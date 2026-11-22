@@ -1,0 +1,3367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SMART IRON — Interactive 3D Product Studio</title>
+
+  <!-- Tailwind CSS for clean, responsive glassmorphic HUD styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Inter & JetBrains Mono fonts for refined CAD/studio typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+
+  <!-- Three.js r160 ES Modules Importmap -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(circle at 50% 38%, #1a1f28 0%, #11141b 55%, #090b0f 100%);
+      color: #f1f5f9;
+      user-select: none;
+    }
+
+    #viewport-container {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      touch-action: none;
+    }
+
+    #viewport-container canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+    }
+
+    /* Glassmorphic HUD Panel */
+    .glass-panel {
+      background: rgba(15, 19, 27, 0.72);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    /* Custom subtle scrollbar for compact mobile drawers */
+    .thin-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .thin-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .thin-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+    }
+
+    /* 3D Feature Callout Layer */
+    #callout-layer {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      overflow: hidden;
+    }
+
+    .callout-badge {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      background: rgba(14, 24, 44, 0.88);
+      border: 1px solid rgba(110, 195, 255, 0.35);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: #f8fafc;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.015em;
+      padding: 6px 11px;
+      border-radius: 10px;
+      white-space: nowrap;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      transition: opacity 0.25s ease;
+    }
+
+    .callout-sub {
+      display: block;
+      font-size: 9.5px;
+      font-weight: 500;
+      color: #7dd3fc;
+      margin-top: 1px;
+    }
+
+    /* Power switch animation */
+    .switch-track {
+      transition: background-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .switch-thumb {
+      transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* Active cloth button glow */
+    .mode-btn-active {
+      background: linear-gradient(135deg, rgba(0, 170, 255, 0.24), rgba(0, 120, 220, 0.12));
+      border-color: rgba(56, 189, 248, 0.65) !important;
+      color: #ffffff;
+      box-shadow: 0 0 18px rgba(0, 170, 255, 0.22);
+    }
+
+    /* Scanning pulse state */
+    .mode-btn-scanning {
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.25), rgba(14, 165, 233, 0.12));
+      border-color: rgba(103, 232, 249, 0.8) !important;
+      color: #ffffff;
+      box-shadow: 0 0 20px rgba(34, 211, 238, 0.3);
+    }
+
+    /* Preset active state */
+    .preset-active {
+      background: rgba(223, 166, 136, 0.22);
+      border-color: rgba(223, 166, 136, 0.65) !important;
+      color: #fde6d8 !important;
+    }
+
+    /* Subtle woven swatch pattern inside cloth buttons */
+    .swatch-dot {
+      background-image:
+        repeating-linear-gradient(45deg, rgba(255,255,255,0.18) 0px, rgba(255,255,255,0.18) 1px, transparent 1px, transparent 3px),
+        repeating-linear-gradient(-45deg, rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px, transparent 1px, transparent 3px);
+    }
+
+    /* Toast Notification */
+    #status-toast {
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 3D WebGL Viewport -->
+  <div id="viewport-container"></div>
+
+  <!-- 3D Projected Feature Callouts Overlay (SVG Leader Lines + Badges) -->
+  <div id="callout-layer" class="hidden">
+    <svg id="callout-svg" class="w-full h-full"></svg>
+    <div id="callout-badges"></div>
+  </div>
+
+  <!-- Top-Left Minimal Brand & Studio Badge -->
+  <header class="fixed top-4 left-4 z-20 flex items-center gap-2.5 pointer-events-auto">
+    <div class="glass-panel rounded-2xl px-3.5 py-2.5 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-[#e2ae91] via-[#c78c6d] to-[#6d4534] flex items-center justify-center shadow-lg">
+        <svg class="w-4 h-4 text-slate-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+        </svg>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-xs sm:text-sm font-semibold tracking-wide text-white leading-none">SMART IRON</h1>
+          <span class="hidden sm:inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-400/25">3D CAD</span>
+        </div>
+        <p class="text-[10.5px] text-slate-400 mt-1 leading-none">Drag to orbit · Scroll to zoom · Inspect 360°</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Top-Center Creator Credit Badge -->
+  <div class="fixed top-[4.65rem] md:top-4 left-1/2 -translate-x-1/2 z-[15] pointer-events-none max-w-[calc(100vw-2rem)]">
+    <div class="glass-panel rounded-full px-3.5 py-1.5 lg:px-4 lg:py-2 border border-[#dfa688]/30 flex items-center gap-2 shadow-lg">
+      <span class="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-[#dfa688] to-sky-400 shadow-[0_0_8px_rgba(223,166,136,0.85)] shrink-0"></span>
+      <span class="text-[10px] sm:text-[10.5px] lg:text-[11px] font-semibold tracking-[0.14em] uppercase whitespace-nowrap bg-gradient-to-r from-[#f3d4c2] via-white to-sky-200 bg-clip-text text-transparent">
+        MADE BY SATYAM PRAKASH
+      </span>
+      <span class="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-sky-400 to-[#dfa688] shadow-[0_0_8px_rgba(56,189,248,0.85)] shrink-0"></span>
+    </div>
+  </div>
+
+  <!-- Right-Side Collapsible Smart Iron Control Panel -->
+  <aside class="fixed top-4 right-4 z-20 flex flex-col items-end gap-2 max-w-[calc(100vw-2rem)]">
+    <!-- Collapse / Expand Button -->
+    <button
+      id="btn-toggle-panel"
+      type="button"
+      class="glass-panel rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:text-white hover:border-white/20 flex items-center gap-2 transition"
+      aria-label="Toggle Control Panel"
+    >
+      <svg class="w-3.5 h-3.5 text-[#dfa98b]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span id="panel-toggle-label">Controls</span>
+    </button>
+
+    <!-- Main Control Card -->
+    <div id="control-panel" class="glass-panel rounded-2xl p-3.5 w-64 sm:w-[276px] max-h-[calc(100vh-8.5rem)] overflow-y-auto thin-scroll space-y-3.5 transition-all duration-300">
+
+      <!-- Power Control Row -->
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <div class="min-w-0 pr-2">
+          <div class="text-xs font-semibold text-white">Smart Power</div>
+          <div id="power-status-text" class="text-[10.5px] text-sky-400 font-medium mt-0.5 truncate">Active · Auto-Sense Ready</div>
+        </div>
+        <button
+          id="btn-power"
+          type="button"
+          class="switch-track relative shrink-0 w-12 h-6 rounded-full bg-sky-500 shadow-[0_0_14px_rgba(14,165,233,0.5)] p-0.5 focus:outline-none"
+          aria-pressed="true"
+          aria-label="Toggle Iron Power"
+        >
+          <span id="power-thumb" class="switch-thumb block w-5 h-5 rounded-full bg-white shadow transform translate-x-6"></span>
+        </button>
+      </div>
+
+      <!-- 3-Cloth Auto-Detection Section (Replaces Manual Temperature Controls) -->
+      <div>
+        <div class="flex items-center justify-between mb-2 gap-1.5">
+          <span class="text-[10.5px] font-semibold uppercase tracking-wider text-slate-400">Place Cloth Under Sensor</span>
+          <span id="hud-temp-readout" class="font-mono text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/30 text-sky-300 whitespace-nowrap">Auto-Sense</span>
+        </div>
+
+        <div id="cloth-selector" class="grid grid-cols-1 gap-1.5">
+          <!-- Populated dynamically with Silk, Cotton, Linen -->
+        </div>
+
+        <!-- Compact Remove Cloth Button (visible/enabled whenever a cloth is under the iron) -->
+        <button
+          id="btn-remove-cloth"
+          type="button"
+          class="hidden mt-2 w-full py-1.5 px-3 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-rose-500/15 hover:border-rose-400/35 text-slate-300 hover:text-rose-200 text-[11px] font-medium flex items-center justify-center gap-1.5 transition"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span>Remove Cloth</span>
+        </button>
+      </div>
+
+      <!-- Steam Burst Action -->
+      <div class="pt-1">
+        <button
+          id="btn-steam"
+          type="button"
+          class="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-sky-500/85 to-cyan-500/85 hover:from-sky-400 hover:to-cyan-400 active:scale-[0.98] text-slate-950 font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20 transition"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+          </svg>
+          <span>Release Steam Burst</span>
+        </button>
+      </div>
+
+      <!-- Studio & Inspection Toggles -->
+      <div class="pt-2.5 border-t border-white/10 space-y-2">
+        <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Viewport Options</span>
+
+        <div class="grid grid-cols-2 gap-1.5">
+          <button id="btn-callouts" type="button" class="viewport-toggle rounded-xl px-2.5 py-2 text-[11px] font-medium border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] text-slate-200 flex items-center justify-center gap-1.5 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="dot-callouts"></span>
+            Callouts
+          </button>
+          <button id="btn-autorotate" type="button" class="viewport-toggle rounded-xl px-2.5 py-2 text-[11px] font-medium border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] text-slate-200 flex items-center justify-center gap-1.5 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="dot-autorotate"></span>
+            Auto-Rotate
+          </button>
+          <button id="btn-wireframe" type="button" class="viewport-toggle rounded-xl px-2.5 py-2 text-[11px] font-medium border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] text-slate-200 flex items-center justify-center gap-1.5 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-slate-500" id="dot-wireframe"></span>
+            Wireframe
+          </button>
+          <button id="btn-floor" type="button" class="viewport-toggle rounded-xl px-2.5 py-2 text-[11px] font-medium border border-sky-400/40 bg-sky-500/15 hover:bg-sky-500/20 text-sky-200 flex items-center justify-center gap-1.5 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-sky-400" id="dot-floor"></span>
+            Studio Floor
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- Bottom-Center Camera Presets Bar -->
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100vw-1.5rem)]">
+    <div class="glass-panel rounded-2xl p-1.5 flex items-center gap-1 overflow-x-auto thin-scroll">
+      <button data-preset="threeQuarter" class="cam-preset-btn preset-active px-3 py-2 rounded-xl text-[11.5px] font-medium border border-transparent text-slate-300 hover:text-white hover:bg-white/[0.06] whitespace-nowrap transition">3/4 View</button>
+      <button data-preset="side" class="cam-preset-btn px-3 py-2 rounded-xl text-[11.5px] font-medium border border-transparent text-slate-300 hover:text-white hover:bg-white/[0.06] whitespace-nowrap transition">Side View</button>
+      <button data-preset="top" class="cam-preset-btn px-3 py-2 rounded-xl text-[11.5px] font-medium border border-transparent text-slate-300 hover:text-white hover:bg-white/[0.06] whitespace-nowrap transition">Top View</button>
+      <button data-preset="rear" class="cam-preset-btn px-3 py-2 rounded-xl text-[11.5px] font-medium border border-transparent text-slate-300 hover:text-white hover:bg-white/[0.06] whitespace-nowrap transition">Rear View</button>
+      <button data-preset="soleplate" class="cam-preset-btn px-3 py-2 rounded-xl text-[11.5px] font-medium border border-transparent text-slate-300 hover:text-white hover:bg-white/[0.06] whitespace-nowrap transition">Soleplate</button>
+    </div>
+  </nav>
+
+  <!-- Subtle Floating Toast Message (Replaces alert) -->
+  <div id="status-toast" class="fixed bottom-20 left-1/2 -translate-x-1/2 z-30 glass-panel rounded-xl px-4 py-2 text-xs font-medium text-sky-200 border border-sky-400/30 opacity-0 pointer-events-none translate-y-2 whitespace-nowrap">
+    Power on the iron to release steam
+  </div>
+
+  <!-- Main Three.js Application Module -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    // =========================================================================
+    // 1. APPLICATION STATE & 3-CLOTH AUTO-DETECTION CONFIGURATION
+    // =========================================================================
+    const CLOTH_TYPES = [
+      {
+        id: 'silk',
+        label: 'Silk',
+        weightTag: 'Delicate',
+        temp: 110,
+        arcFrac: 0.36,
+        ledIntensity: 1.50,
+        colorHex: '#c04868',
+        sheenHex: '#f5b0c4',
+        roughness: 0.32,
+        sheen: 1.0,
+        sheenRoughness: 0.24,
+        bumpScale: 0.0045
+      },
+      {
+        id: 'cotton',
+        label: 'Cotton',
+        weightTag: 'Medium',
+        temp: 150,
+        arcFrac: 0.68,
+        ledIntensity: 2.15,
+        colorHex: '#3b78b8',
+        sheenHex: '#9ac6f2',
+        roughness: 0.78,
+        sheen: 0.32,
+        sheenRoughness: 0.72,
+        bumpScale: 0.011
+      },
+      {
+        id: 'linen',
+        label: 'Linen',
+        weightTag: 'Heavy',
+        temp: 200,
+        arcFrac: 1.00,
+        ledIntensity: 2.95,
+        colorHex: '#c8b496',
+        sheenHex: '#f0e2cc',
+        roughness: 0.88,
+        sheen: 0.38,
+        sheenRoughness: 0.82,
+        bumpScale: 0.016
+      }
+    ];
+
+    const CAMERA_PRESETS = {
+      threeQuarter: { pos: new THREE.Vector3(-2.65, 1.65, 2.55), target: new THREE.Vector3(0.02, 0.58, 0.0) },
+      side:         { pos: new THREE.Vector3(-0.05, 0.72, 3.65), target: new THREE.Vector3(0.05, 0.60, 0.0) },
+      top:          { pos: new THREE.Vector3(-0.35, 3.65, 0.45), target: new THREE.Vector3(-0.02, 0.48, 0.0) },
+      rear:         { pos: new THREE.Vector3(2.85, 1.25, 1.55),  target: new THREE.Vector3(0.35, 0.62, 0.0) },
+      soleplate:    { pos: new THREE.Vector3(-1.35, -2.05, 2.15), target: new THREE.Vector3(-0.22, 0.08, 0.0) }
+    };
+
+    const FEATURE_CALLOUTS = [
+      {
+        id: 'display',
+        title: 'Large Temperature Display',
+        sub: 'Curved OLED Auto-Readout',
+        anchor: new THREE.Vector3(-0.64, 0.90, 0.0),
+        offset: { x: -85, y: -62 }
+      },
+      {
+        id: 'handle',
+        title: 'Ergonomic Handle',
+        sub: 'Rose-Gold Spine · Rubber Grip',
+        anchor: new THREE.Vector3(0.24, 1.31, 0.0),
+        offset: { x: 20, y: -64 }
+      },
+      {
+        id: 'soleplate',
+        title: 'Bottom Fabric Sensor',
+        sub: 'Auto-Detects Cloth & Sets Temp',
+        anchor: new THREE.Vector3(-0.35, 0.0, 0.0),
+        offset: { x: -46, y: 64 }
+      },
+      {
+        id: 'design',
+        title: 'Sleek Modern Design',
+        sub: 'No Manual Knob · Piano Black',
+        anchor: new THREE.Vector3(0.66, 0.31, 0.56),
+        offset: { x: 75, y: 48 }
+      },
+      {
+        id: 'cord',
+        title: 'Braided Power Cord',
+        sub: 'Ribbed Strain Relief Boot',
+        anchor: new THREE.Vector3(1.30, 1.34, 0.02),
+        offset: { x: 78, y: -44 }
+      },
+      {
+        id: 'led',
+        title: 'Blue LED Tip',
+        sub: 'Precision Illumination Lens',
+        anchor: new THREE.Vector3(-1.34, 0.19, 0.0),
+        offset: { x: -86, y: 18 }
+      }
+    ];
+
+    const state = {
+      powerOn: true,
+      powerFactor: 1.0,
+      targetPowerFactor: 1.0,
+
+      // Auto-Sense Cloth Choreography State Machine
+      // phase: 'standby' | 'sliding_in' | 'scanning' | 'locked' | 'sliding_out'
+      phase: 'standby',
+      phaseTimer: 0.0,
+      activeClothIndex: null,     // null when no cloth is under iron; 0, 1, or 2 otherwise
+      pendingClothIndex: null,    // queued next cloth if user switches directly from one cloth to another
+      displayedTemp: 80,          // smoothly ramps to detected temp on lock
+      targetTemp: 80,
+      lockFlashTimer: 0.0,
+
+      // Iron vertical lift & cloth slide animation values
+      ironLiftY: 0.0,
+      targetIronLiftY: 0.0,
+      clothSlideZ: 2.8,
+
+      // Viewport options
+      showCallouts: false,
+      autoRotate: false,
+      wireframe: false,
+      showFloor: true,
+      panelOpen: window.innerWidth >= 640
+    };
+
+    // Global scene references
+    let scene, camera, renderer, controls, clock;
+    let ironGroup, studioFloorGroup, contactShadowMat;
+    let oledCanvas, oledCtx, oledTexture, oledMaterial;
+    let blueLedMaterial, blueLedCoreMaterial, tipPointLight;
+    let sensorRingMat, sensorIrMat, sensorBeamMesh, sensorBeamMat, sensorPointLight;
+    let clothGroup, clothMesh, clothBasePositions, scanReticleMesh, scanReticleMat;
+    const clothMaterials = [];
+    let steamParticles = [];
+    let steamSpriteMaterial;
+    let allIronMeshes = [];
+
+    // Smooth camera transition state
+    const camTransition = {
+      active: false,
+      startTime: 0,
+      duration: 0.9,
+      fromPos: new THREE.Vector3(),
+      toPos: new THREE.Vector3(),
+      fromTarget: new THREE.Vector3(),
+      toTarget: new THREE.Vector3()
+    };
+
+    // =========================================================================
+    // 2. PROCEDURAL PBR TEXTURES (ZERO EXTERNAL IMAGE URLS)
+    // =========================================================================
+
+    /**
+     * Generates a fine horizontal brushed metal bump & roughness map.
+     */
+    function createBrushedMetalTexture(baseBrightness = 155, streakIntensity = 28) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = `rgb(${baseBrightness},${baseBrightness},${baseBrightness})`;
+      ctx.fillRect(0, 0, 512, 512);
+
+      for (let i = 0; i < 3200; i++) {
+        const y = Math.random() * 512;
+        const x = Math.random() * 512;
+        const len = 45 + Math.random() * 190;
+        const v = Math.max(0, Math.min(255, baseBrightness + (Math.random() - 0.5) * 2 * streakIntensity));
+        ctx.fillStyle = `rgba(${v},${v},${v},0.35)`;
+        ctx.fillRect(x, y, len, 1 + Math.random() * 0.9);
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(3, 2);
+      return tex;
+    }
+
+    /**
+     * Generates a fine micro-pebble elastomer/leather texture for the handle rubber grip.
+     */
+    function createRubberGripTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#707070';
+      ctx.fillRect(0, 0, 512, 512);
+
+      for (let i = 0; i < 14000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const r = 0.8 + Math.random() * 1.9;
+        const shade = Math.random() > 0.45 ? 165 + Math.random() * 65 : 40 + Math.random() * 45;
+        ctx.fillStyle = `rgba(${shade},${shade},${shade},0.48)`;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(5, 3);
+      return tex;
+    }
+
+    /**
+     * Generates the crisp black-and-white diagonal woven braided fabric pattern for the power cord.
+     */
+    function createBraidedCordTextures() {
+      const size = 256;
+      const colorCanvas = document.createElement('canvas');
+      colorCanvas.width = size;
+      colorCanvas.height = size;
+      const cCtx = colorCanvas.getContext('2d');
+
+      const bumpCanvas = document.createElement('canvas');
+      bumpCanvas.width = size;
+      bumpCanvas.height = size;
+      const bCtx = bumpCanvas.getContext('2d');
+
+      cCtx.fillStyle = '#121317';
+      cCtx.fillRect(0, 0, size, size);
+      bCtx.fillStyle = '#404040';
+      bCtx.fillRect(0, 0, size, size);
+
+      const step = 32;
+      for (let y = -size; y < size * 2; y += step) {
+        for (let x = -size; x < size * 2; x += step) {
+          const isWhite = ((Math.floor(x / step) + Math.floor(y / step)) & 1) === 0;
+
+          cCtx.save();
+          cCtx.translate(x + step / 2, y + step / 2);
+          cCtx.rotate(isWhite ? Math.PI / 4 : -Math.PI / 4);
+
+          const grad = cCtx.createLinearGradient(0, -step * 0.36, 0, step * 0.36);
+          if (isWhite) {
+            grad.addColorStop(0, '#9aa0aa');
+            grad.addColorStop(0.5, '#f4f6fa');
+            grad.addColorStop(1, '#8c929d');
+          } else {
+            grad.addColorStop(0, '#090a0d');
+            grad.addColorStop(0.5, '#252830');
+            grad.addColorStop(1, '#08090c');
+          }
+          cCtx.fillStyle = grad;
+          cCtx.fillRect(-step * 0.56, -step * 0.28, step * 1.12, step * 0.56);
+          cCtx.restore();
+
+          bCtx.save();
+          bCtx.translate(x + step / 2, y + step / 2);
+          bCtx.rotate(isWhite ? Math.PI / 4 : -Math.PI / 4);
+          const bGrad = bCtx.createLinearGradient(0, -step * 0.34, 0, step * 0.34);
+          bGrad.addColorStop(0, '#2a2a2a');
+          bGrad.addColorStop(0.5, '#e8e8e8');
+          bGrad.addColorStop(1, '#2a2a2a');
+          bCtx.fillStyle = bGrad;
+          bCtx.fillRect(-step * 0.54, -step * 0.28, step * 1.08, step * 0.56);
+          bCtx.restore();
+        }
+      }
+
+      const map = new THREE.CanvasTexture(colorCanvas);
+      map.colorSpace = THREE.SRGBColorSpace;
+      map.wrapS = THREE.RepeatWrapping;
+      map.wrapT = THREE.RepeatWrapping;
+      map.repeat.set(18, 2);
+
+      const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+      bumpMap.wrapS = THREE.RepeatWrapping;
+      bumpMap.wrapT = THREE.RepeatWrapping;
+      bumpMap.repeat.set(18, 2);
+
+      return { map, bumpMap };
+    }
+
+    /**
+     * Generates subtle engraved steam channels & brushed titanium finish for the soleplate underside.
+     */
+    function createSoleplateUndersideTexture() {
+      const w = 1024, h = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+
+      const bg = ctx.createLinearGradient(0, 0, w, 0);
+      bg.addColorStop(0, '#c2c7cf');
+      bg.addColorStop(0.5, '#d7dce3');
+      bg.addColorStop(1, '#b9bfc8');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+
+      for (let i = 0; i < 1800; i++) {
+        const x = Math.random() * w;
+        const y = Math.random() * h;
+        const v = 165 + Math.random() * 55;
+        ctx.fillStyle = `rgba(${v},${v},${v},0.28)`;
+        ctx.fillRect(x, y, 60 + Math.random() * 140, 1);
+      }
+
+      ctx.strokeStyle = 'rgba(72, 78, 90, 0.55)';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+
+      ctx.beginPath();
+      ctx.moveTo(85, h / 2);
+      ctx.quadraticCurveTo(360, 72, 870, 92);
+      ctx.moveTo(85, h / 2);
+      ctx.quadraticCurveTo(360, h - 72, 870, h - 92);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(84, 90, 102, 0.42)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(185, h / 2);
+      ctx.quadraticCurveTo(420, 150, 760, 165);
+      ctx.moveTo(185, h / 2);
+      ctx.quadraticCurveTo(420, h - 150, 760, h - 165);
+      ctx.stroke();
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    /**
+     * Generates a soft billowing radial puff texture for 3D steam particles.
+     */
+    function createSteamPuffTexture() {
+      const size = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      const grad = ctx.createRadialGradient(size / 2, size / 2, 4, size / 2, size / 2, size / 2);
+      grad.addColorStop(0, 'rgba(235, 248, 255, 0.72)');
+      grad.addColorStop(0.4, 'rgba(215, 238, 255, 0.36)');
+      grad.addColorStop(0.75, 'rgba(195, 225, 255, 0.08)');
+      grad.addColorStop(1, 'rgba(195, 225, 255, 0.0)');
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    /**
+     * Generates the sleek dark CAD grid texture for the studio floor.
+     */
+    function createStudioGridTexture() {
+      const size = 1024;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#11141b';
+      ctx.fillRect(0, 0, size, size);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.045)';
+      ctx.lineWidth = 1.5;
+      const step = size / 8;
+      for (let i = 0; i <= 8; i++) {
+        const p = i * step;
+        ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
+      }
+
+      ctx.strokeStyle = 'rgba(148, 175, 210, 0.11)';
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(0, 0, size, size);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(9, 9);
+      tex.anisotropy = 8;
+      return tex;
+    }
+
+    /**
+     * Generates a soft elliptical contact shadow texture for right beneath the soleplate.
+     */
+    function createContactShadowTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+
+      const grad = ctx.createRadialGradient(256, 128, 22, 256, 128, 240);
+      grad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
+      grad.addColorStop(0.55, 'rgba(0, 0, 0, 0.45)');
+      grad.addColorStop(0.85, 'rgba(0, 0, 0, 0.10)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 512, 256);
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    /**
+     * Generates a clean rounded-rectangle alpha mask so the 3D cloth swatch has soft tailored corners.
+     */
+    function createRoundedClothAlphaMap() {
+      const w = 512, h = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+
+      const pad = 16;
+      const r = 46;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(pad + r, pad);
+      ctx.lineTo(w - pad - r, pad);
+      ctx.quadraticCurveTo(w - pad, pad, w - pad, pad + r);
+      ctx.lineTo(w - pad, h - pad - r);
+      ctx.quadraticCurveTo(w - pad, h - pad, w - pad - r, h - pad);
+      ctx.lineTo(pad + r, h - pad);
+      ctx.quadraticCurveTo(pad, h - pad, pad, h - pad - r);
+      ctx.lineTo(pad, pad + r);
+      ctx.quadraticCurveTo(pad, pad, pad + r, pad);
+      ctx.closePath();
+      ctx.fill();
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    /**
+     * Generates realistic procedural color + bump weave textures for Silk, Cotton, and Linen.
+     */
+    function createClothWeaveTextures(cloth) {
+      const size = 512;
+      const cCanvas = document.createElement('canvas');
+      cCanvas.width = size;
+      cCanvas.height = size;
+      const cCtx = cCanvas.getContext('2d');
+
+      const bCanvas = document.createElement('canvas');
+      bCanvas.width = size;
+      bCanvas.height = size;
+      const bCtx = bCanvas.getContext('2d');
+
+      cCtx.fillStyle = cloth.colorHex;
+      cCtx.fillRect(0, 0, size, size);
+      bCtx.fillStyle = '#808080';
+      bCtx.fillRect(0, 0, size, size);
+
+      if (cloth.id === 'silk') {
+        // Lustrous rose-champagne / burgundy-rose silk with fine diagonal satin sheen
+        const silkGrad = cCtx.createLinearGradient(0, 0, size, size);
+        silkGrad.addColorStop(0.0, 'rgba(255, 200, 215, 0.22)');
+        silkGrad.addColorStop(0.38, 'rgba(130, 30, 62, 0.14)');
+        silkGrad.addColorStop(0.66, 'rgba(255, 215, 226, 0.26)');
+        silkGrad.addColorStop(1.0, 'rgba(110, 26, 52, 0.16)');
+        cCtx.fillStyle = silkGrad;
+        cCtx.fillRect(0, 0, size, size);
+
+        for (let i = -size; i < size * 2; i += 5) {
+          cCtx.strokeStyle = i % 10 === 0 ? 'rgba(255,225,235,0.16)' : 'rgba(90,18,40,0.12)';
+          cCtx.lineWidth = 1.6;
+          cCtx.beginPath(); cCtx.moveTo(i, 0); cCtx.lineTo(i + size, size); cCtx.stroke();
+
+          bCtx.strokeStyle = i % 10 === 0 ? 'rgba(210,210,210,0.38)' : 'rgba(95,95,95,0.34)';
+          bCtx.lineWidth = 1.6;
+          bCtx.beginPath(); bCtx.moveTo(i, 0); bCtx.lineTo(i + size, size); bCtx.stroke();
+        }
+      } else if (cloth.id === 'cotton') {
+        // Crisp woven denim / sky-blue cotton crosshatch warp & weft weave
+        const pitch = 7;
+        for (let y = 0; y < size; y += pitch) {
+          cCtx.fillStyle = y % (pitch * 2) === 0 ? 'rgba(220,238,255,0.17)' : 'rgba(18,46,84,0.12)';
+          cCtx.fillRect(0, y, size, 3);
+          bCtx.fillStyle = 'rgba(215,215,215,0.48)';
+          bCtx.fillRect(0, y, size, 3);
+        }
+        for (let x = 0; x < size; x += pitch) {
+          cCtx.fillStyle = x % (pitch * 2) === 0 ? 'rgba(20,52,96,0.18)' : 'rgba(195,224,255,0.11)';
+          cCtx.fillRect(x, 0, 3, size);
+          bCtx.fillStyle = 'rgba(68,68,68,0.48)';
+          bCtx.fillRect(x, 0, 3, size);
+        }
+      } else {
+        // Warm natural oatmeal/sand linen with organic coarse slub threads
+        const pitch = 9;
+        for (let y = 0; y < size; y += pitch) {
+          cCtx.fillStyle = 'rgba(255,248,236,0.18)';
+          cCtx.fillRect(0, y, size, 3.5);
+          bCtx.fillStyle = 'rgba(220,220,220,0.52)';
+          bCtx.fillRect(0, y, size, 3.5);
+        }
+        for (let x = 0; x < size; x += pitch) {
+          cCtx.fillStyle = 'rgba(118,95,68,0.17)';
+          cCtx.fillRect(x, 0, 3.5, size);
+          bCtx.fillStyle = 'rgba(65,65,65,0.52)';
+          bCtx.fillRect(x, 0, 3.5, size);
+        }
+        // Characteristic organic linen slub irregularities
+        for (let i = 0; i < 420; i++) {
+          const horizontal = Math.random() > 0.5;
+          const sx = Math.random() * size;
+          const sy = Math.random() * size;
+          const slen = 18 + Math.random() * 58;
+          const light = Math.random() > 0.45;
+          cCtx.fillStyle = light ? 'rgba(248,238,220,0.28)' : 'rgba(116,92,64,0.26)';
+          bCtx.fillStyle = light ? 'rgba(240,240,240,0.55)' : 'rgba(50,50,50,0.55)';
+          if (horizontal) {
+            cCtx.fillRect(sx, sy, slen, 2.5);
+            bCtx.fillRect(sx, sy, slen, 2.5);
+          } else {
+            cCtx.fillRect(sx, sy, 2.5, slen);
+            bCtx.fillRect(sx, sy, 2.5, slen);
+          }
+        }
+      }
+
+      // Subtle tailored stitched hem border inset cleanly inside the rounded swatch edge
+      const p = 32, r = 34;
+      cCtx.strokeStyle = 'rgba(255,255,255,0.34)';
+      cCtx.lineWidth = 3;
+      cCtx.setLineDash([10, 7]);
+      cCtx.beginPath();
+      cCtx.moveTo(p + r, p);
+      cCtx.lineTo(size - p - r, p);
+      cCtx.quadraticCurveTo(size - p, p, size - p, p + r);
+      cCtx.lineTo(size - p, size - p - r);
+      cCtx.quadraticCurveTo(size - p, size - p, size - p - r, size - p);
+      cCtx.lineTo(p + r, size - p);
+      cCtx.quadraticCurveTo(p, size - p, p, size - p - r);
+      cCtx.lineTo(p, p + r);
+      cCtx.quadraticCurveTo(p, p, p + r, p);
+      cCtx.closePath();
+      cCtx.stroke();
+      cCtx.setLineDash([]);
+
+      const map = new THREE.CanvasTexture(cCanvas);
+      map.colorSpace = THREE.SRGBColorSpace;
+      map.anisotropy = 8;
+
+      const bumpMap = new THREE.CanvasTexture(bCanvas);
+      bumpMap.anisotropy = 4;
+
+      return { map, bumpMap };
+    }
+
+    /**
+     * Generates a soft additive gradient + scanline texture for the volumetric cyan scanning beam cone.
+     */
+    function createScanBeamTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      // ConeGeometry UVs: V=1 at apex (top), V=0 at circular base (bottom)
+      const grad = ctx.createLinearGradient(0, 0, 0, 512);
+      grad.addColorStop(0.0, 'rgba(130, 244, 255, 0.95)');
+      grad.addColorStop(0.3, 'rgba(0, 195, 255, 0.50)');
+      grad.addColorStop(0.75, 'rgba(0, 160, 255, 0.20)');
+      grad.addColorStop(1.0, 'rgba(0, 140, 255, 0.02)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 512);
+
+      // Vertical fine laser ray streaks
+      for (let x = 0; x < 256; x += 16) {
+        ctx.fillStyle = 'rgba(195, 248, 255, 0.14)';
+        ctx.fillRect(x, 0, 2, 512);
+      }
+      // Horizontal scan wave pulses
+      for (let y = 0; y < 512; y += 26) {
+        ctx.fillStyle = 'rgba(175, 244, 255, 0.22)';
+        ctx.fillRect(0, y, 256, 2.5);
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      return tex;
+    }
+
+    /**
+     * Generates the glowing rotating optical scan reticle projected onto the cloth surface.
+     */
+    function createScanReticleTexture() {
+      const size = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const cx = size / 2, cy = size / 2;
+
+      const glow = ctx.createRadialGradient(cx, cy, 8, cx, cy, 240);
+      glow.addColorStop(0.0, 'rgba(135, 245, 255, 0.68)');
+      glow.addColorStop(0.45, 'rgba(0, 188, 255, 0.28)');
+      glow.addColorStop(0.82, 'rgba(0, 145, 255, 0.08)');
+      glow.addColorStop(1.0, 'rgba(0, 145, 255, 0.0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, size, size);
+
+      // Outer segmented optical scanner ring
+      ctx.strokeStyle = 'rgba(155, 245, 255, 0.95)';
+      ctx.lineWidth = 7;
+      ctx.setLineDash([32, 18]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 206, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner solid calibration ring
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(56, 218, 255, 0.85)';
+      ctx.lineWidth = 4.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 130, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Precision crosshair ticks
+      ctx.strokeStyle = 'rgba(205, 248, 255, 0.78)';
+      ctx.lineWidth = 3.5;
+      for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * 46, cy + Math.sin(a) * 46);
+        ctx.lineTo(cx + Math.cos(a) * 192, cy + Math.sin(a) * 192);
+        ctx.stroke();
+      }
+
+      // Center optical dot
+      ctx.fillStyle = '#ebfcff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 11, 0, Math.PI * 2);
+      ctx.fill();
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // =========================================================================
+    // 3. LIVE-UPDATED OLED DIGITAL TEMPERATURE DISPLAY CANVAS
+    // =========================================================================
+
+    /**
+     * Draws a sleek slanted 7-segment digit (or '-' dash) onto the OLED canvas.
+     */
+    function drawSevenSegmentDigit(ctx, digit, x, y, w, h, thickness) {
+      // Segment map: [top, topRight, botRight, bottom, botLeft, topLeft, middle]
+      const segs = {
+        '0': [1, 1, 1, 1, 1, 1, 0],
+        '1': [0, 1, 1, 0, 0, 0, 0],
+        '2': [1, 1, 0, 1, 1, 0, 1],
+        '3': [1, 1, 1, 1, 0, 0, 1],
+        '4': [0, 1, 1, 0, 0, 1, 1],
+        '5': [1, 0, 1, 1, 0, 1, 1],
+        '6': [1, 0, 1, 1, 1, 1, 1],
+        '7': [1, 1, 1, 0, 0, 0, 0],
+        '8': [1, 1, 1, 1, 1, 1, 1],
+        '9': [1, 1, 1, 1, 0, 1, 1],
+        '-': [0, 0, 0, 0, 0, 0, 1]
+      }[digit] || [0, 0, 0, 0, 0, 0, 0];
+
+      const halfH = h / 2;
+      const t = thickness;
+      const g = t * 0.45;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.transform(1, 0, -0.14, 1, 0, 0);
+
+      const drawHBar = (bx, by, len) => {
+        ctx.beginPath();
+        ctx.moveTo(bx + g, by);
+        ctx.lineTo(bx + len - g, by);
+        ctx.lineTo(bx + len - g - t * 0.5, by + t);
+        ctx.lineTo(bx + g + t * 0.5, by + t);
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      const drawHBarCenter = (bx, by, len) => {
+        const ht = t * 0.52;
+        ctx.beginPath();
+        ctx.moveTo(bx + g, by);
+        ctx.lineTo(bx + g + ht, by - ht);
+        ctx.lineTo(bx + len - g - ht, by - ht);
+        ctx.lineTo(bx + len - g, by);
+        ctx.lineTo(bx + len - g - ht, by + ht);
+        ctx.lineTo(bx + g + ht, by + ht);
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      const drawVBar = (bx, by, len) => {
+        ctx.beginPath();
+        ctx.moveTo(bx, by + g);
+        ctx.lineTo(bx + t, by + g + t * 0.5);
+        ctx.lineTo(bx + t, by + len - g - t * 0.5);
+        ctx.lineTo(bx, by + len - g);
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      const drawVBarRight = (bx, by, len) => {
+        ctx.beginPath();
+        ctx.moveTo(bx + t, by + g);
+        ctx.lineTo(bx + t, by + len - g);
+        ctx.lineTo(bx, by + len - g - t * 0.5);
+        ctx.lineTo(bx, by + g + t * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      if (segs[0]) drawHBar(0, 0, w);
+      if (segs[1]) drawVBarRight(w - t, 0, halfH);
+      if (segs[2]) drawVBarRight(w - t, halfH, halfH);
+      if (segs[3]) {
+        ctx.beginPath();
+        ctx.moveTo(g + t * 0.5, h - t);
+        ctx.lineTo(w - g - t * 0.5, h - t);
+        ctx.lineTo(w - g, h);
+        ctx.lineTo(g, h);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (segs[4]) drawVBar(0, halfH, halfH);
+      if (segs[5]) drawVBar(0, 0, halfH);
+      if (segs[6]) drawHBarCenter(0, halfH, w);
+
+      ctx.restore();
+    }
+
+    /**
+     * Initializes the high-resolution OLED canvas and draws the initial Auto-Sense Standby screen.
+     */
+    function initOledDisplayCanvas() {
+      oledCanvas = document.createElement('canvas');
+      oledCanvas.width = 1024;
+      oledCanvas.height = 1024;
+      oledCtx = oledCanvas.getContext('2d');
+
+      oledTexture = new THREE.CanvasTexture(oledCanvas);
+      oledTexture.colorSpace = THREE.SRGBColorSpace;
+      oledTexture.anisotropy = 8;
+      updateOledCanvas(0);
+    }
+
+    /**
+     * Draws a crisp optical/IR sensor waves emblem at (x, y).
+     */
+    function drawSensorWaveIcon(ctx, x, y, scale, elapsed, animated) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.strokeStyle = '#38d6ff';
+      ctx.fillStyle = '#c8f6ff';
+      ctx.shadowColor = '#00b4ff';
+      ctx.shadowBlur = animated ? 32 : 20;
+      ctx.lineWidth = 11;
+      ctx.lineCap = 'round';
+
+      // Optical lens center dot
+      ctx.beginPath();
+      ctx.arc(0, -18, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 3 downward radiating optical detection arcs
+      for (let i = 0; i < 3; i++) {
+        const r = 28 + i * 18;
+        ctx.globalAlpha = animated
+          ? 0.38 + 0.62 * (0.5 + 0.5 * Math.sin(elapsed * 12 - i * 1.15))
+          : 0.85 - i * 0.16;
+        ctx.beginPath();
+        ctx.arc(0, -18, r, Math.PI * 0.22, Math.PI * 0.78, false);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    /**
+     * Redraws the curved OLED display texture live based on Auto-Sense state:
+     * - Standby / Sliding Out: dim pulsing cyan arc, optical wave emblem, "--°C", "Auto-Sense"
+     * - Sliding In / Scanning: sweeping cyan arc, sensor waves, "SCAN", "Detecting..."
+     * - Locked: filled fabric arc, steam cloud icon, ramped temp digits, "AUTO DETECTED", fabric name
+     */
+    function updateOledCanvas(elapsed = 0) {
+      const ctx = oledCtx;
+      const W = 1024, H = 1024;
+      const isScanning = state.phase === 'scanning' || state.phase === 'sliding_in';
+      const isLocked = state.phase === 'locked' && state.activeClothIndex !== null;
+      const cloth = state.activeClothIndex !== null ? CLOTH_TYPES[state.activeClothIndex] : null;
+
+      // Deep glossy obsidian OLED glass background
+      ctx.fillStyle = '#030508';
+      ctx.fillRect(0, 0, W, H);
+
+      const radBg = ctx.createRadialGradient(W * 0.5, H * 0.42, 40, W * 0.5, H * 0.5, 490);
+      radBg.addColorStop(0, isScanning ? 'rgba(0, 200, 255, 0.16)' : isLocked ? 'rgba(0, 128, 220, 0.10)' : 'rgba(0, 120, 210, 0.06)');
+      radBg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = radBg;
+      ctx.fillRect(0, 0, W, H);
+
+      // 1. TOP SEMICIRCULAR PROGRESS ARC (~216 degrees)
+      const cx = W * 0.5;
+      const cy = H * 0.355;
+      const arcR = 250;
+      const startAngle = Math.PI * 0.90;
+      const totalSpan = Math.PI * 1.20;
+      const endAngleFull = startAngle + totalSpan;
+
+      // Dim background arc track
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, arcR, startAngle, endAngleFull, false);
+      ctx.strokeStyle = 'rgba(0, 145, 255, 0.15)';
+      ctx.lineWidth = 34;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      if (isScanning) {
+        // Animated sweeping cyan radar arc while detecting cloth
+        const sweepPhase = (elapsed * 1.85) % 1.0;
+        const sweepSpan = totalSpan * 0.36;
+        const a0 = startAngle + sweepPhase * (totalSpan - sweepSpan);
+        const a1 = a0 + sweepSpan;
+
+        ctx.shadowColor = '#00e5ff';
+        ctx.shadowBlur = 46;
+        ctx.beginPath();
+        ctx.arc(cx, cy, arcR, a0, a1, false);
+        ctx.strokeStyle = '#38ecff';
+        ctx.lineWidth = 36;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      } else if (isLocked && cloth) {
+        // Smoothly filled glowing electric-blue arc matching detected cloth temperature
+        const currentFrac = Math.max(0.18, Math.min(1.0, (state.displayedTemp - 72) / (200 - 72)));
+        const displayFrac = THREE.MathUtils.lerp(currentFrac, cloth.arcFrac, 0.5);
+        const endAngleActive = startAngle + totalSpan * displayFrac;
+
+        ctx.shadowColor = '#00aaff';
+        ctx.shadowBlur = 42;
+        ctx.beginPath();
+        ctx.arc(cx, cy, arcR, startAngle, endAngleActive, false);
+        const arcGrad = ctx.createLinearGradient(cx - arcR, cy, cx + arcR, cy);
+        arcGrad.addColorStop(0, '#0077ff');
+        arcGrad.addColorStop(0.5, '#00c8ff');
+        arcGrad.addColorStop(1, '#5ee7ff');
+        ctx.strokeStyle = arcGrad;
+        ctx.lineWidth = 34;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = 'rgba(205, 246, 255, 0.72)';
+        ctx.lineWidth = 10;
+        ctx.stroke();
+      } else {
+        // Standby: soft breathing dim cyan arc
+        const breath = 0.28 + 0.22 * (0.5 + 0.5 * Math.sin(elapsed * 2.4));
+        ctx.shadowColor = '#00aaff';
+        ctx.shadowBlur = 22;
+        ctx.beginPath();
+        ctx.arc(cx, cy, arcR, startAngle, endAngleFull, false);
+        ctx.strokeStyle = `rgba(34, 211, 238, ${breath.toFixed(2)})`;
+        ctx.lineWidth = 28;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 2. TOP EMBLEM INSIDE ARC: Steam Cloud (when locked) or Optical Sensor Wave Emblem (standby/scanning)
+      if (isLocked) {
+        ctx.save();
+        ctx.translate(cx, H * 0.275);
+        ctx.shadowColor = '#00b4ff';
+        ctx.shadowBlur = 24;
+        ctx.strokeStyle = '#38d2ff';
+        ctx.lineWidth = 13;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        ctx.moveTo(-42, 24);
+        ctx.bezierCurveTo(-76, 24, -76, -24, -36, -22);
+        ctx.bezierCurveTo(-30, -64, 30, -64, 36, -22);
+        ctx.bezierCurveTo(76, -24, 76, 24, 42, 24);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.lineWidth = 8;
+        ctx.strokeStyle = '#9ceeff';
+        ctx.beginPath();
+        ctx.arc(0, 12, 16, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        drawSensorWaveIcon(ctx, cx, H * 0.278, 1.12, elapsed, isScanning);
+      }
+
+      // 3. CENTER READOUT: "SCAN" / "--°C" / Ramped 7-Segment Temperature
+      if (isScanning) {
+        const pulse = 0.65 + 0.35 * Math.sin(elapsed * 14);
+        ctx.save();
+        ctx.fillStyle = `rgba(115, 242, 255, ${pulse.toFixed(2)})`;
+        ctx.shadowColor = '#00ccff';
+        ctx.shadowBlur = 34;
+        ctx.font = '700 132px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('SCAN', cx, H * 0.470);
+
+        // Animated horizontal laser scanning bars below SCAN
+        const barW = 340;
+        const scanOffset = Math.sin(elapsed * 10) * 110;
+        ctx.fillStyle = 'rgba(56, 224, 255, 0.22)';
+        ctx.fillRect(cx - barW / 2, H * 0.558, barW, 12);
+        ctx.fillStyle = '#7ef3ff';
+        ctx.fillRect(cx + scanOffset - 52, H * 0.558, 104, 12);
+        ctx.restore();
+      } else if (isLocked && cloth) {
+        const shownTemp = Math.round(state.displayedTemp);
+        const tempStr = String(shownTemp);
+        ctx.save();
+        ctx.fillStyle = '#f5fbff';
+        ctx.shadowColor = 'rgba(130, 220, 255, 0.85)';
+        ctx.shadowBlur = 26;
+
+        const digitW = 104;
+        const digitH = 186;
+        const digitGap = 30;
+        const thickness = 22;
+        const totalDigitsW = tempStr.length * digitW + (tempStr.length - 1) * digitGap;
+        const startX = cx - totalDigitsW * 0.5 - 38;
+        const startY = H * 0.365;
+
+        for (let i = 0; i < tempStr.length; i++) {
+          drawSevenSegmentDigit(ctx, tempStr[i], startX + i * (digitW + digitGap), startY, digitW, digitH, thickness);
+        }
+
+        ctx.font = '700 82px Inter, sans-serif';
+        ctx.fillStyle = '#eaf6ff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('°C', startX + totalDigitsW + 22, startY + 2);
+        ctx.restore();
+      } else {
+        // Standby "--°C" in 7-segment style
+        const tempStr = '--';
+        ctx.save();
+        ctx.fillStyle = 'rgba(215, 240, 255, 0.72)';
+        ctx.shadowColor = 'rgba(80, 200, 255, 0.55)';
+        ctx.shadowBlur = 18;
+
+        const digitW = 104;
+        const digitH = 186;
+        const digitGap = 36;
+        const thickness = 22;
+        const totalDigitsW = tempStr.length * digitW + digitGap;
+        const startX = cx - totalDigitsW * 0.5 - 38;
+        const startY = H * 0.365;
+
+        for (let i = 0; i < tempStr.length; i++) {
+          drawSevenSegmentDigit(ctx, tempStr[i], startX + i * (digitW + digitGap), startY, digitW, digitH, thickness);
+        }
+
+        ctx.font = '700 82px Inter, sans-serif';
+        ctx.fillStyle = 'rgba(195, 232, 255, 0.68)';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('°C', startX + totalDigitsW + 24, startY + 2);
+        ctx.restore();
+      }
+
+      // 4. GLOWING CYAN FABRIC / AUTO-SENSE LABEL + AUTO DETECTED MICRO-BADGE
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      if (isScanning) {
+        ctx.shadowColor = '#00b8ff';
+        ctx.shadowBlur = 24;
+        ctx.fillStyle = '#67e8f9';
+        ctx.font = '600 62px Inter, sans-serif';
+        ctx.fillText('Detecting...', cx, H * 0.655);
+      } else if (isLocked && cloth) {
+        // Crisp tiny "AUTO DETECTED" micro-badge right above cloth name
+        ctx.shadowColor = '#00e5a0';
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = '#6ee7b7';
+        ctx.font = '700 28px Inter, sans-serif';
+        ctx.fillText('AUTO DETECTED', cx, H * 0.598);
+
+        // Glowing detected cloth type label
+        ctx.shadowColor = '#00aaff';
+        ctx.shadowBlur = 26;
+        ctx.fillStyle = '#38c7ff';
+        ctx.font = '700 78px Inter, sans-serif';
+        ctx.fillText(cloth.label, cx, H * 0.672);
+      } else {
+        ctx.shadowColor = '#00aaff';
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = '#56ccf2';
+        ctx.font = '600 62px Inter, sans-serif';
+        ctx.fillText('Auto-Sense', cx, H * 0.655);
+      }
+      ctx.restore();
+
+      // 5. BOTTOM TOUCH ICONS: POWER (LEFT) & OPTICAL SENSOR ICON (RIGHT)
+      // Left: Power Icon
+      ctx.save();
+      const px = cx - 140;
+      const py = H * 0.805;
+      ctx.strokeStyle = '#f1f7ff';
+      ctx.shadowColor = 'rgba(160, 225, 255, 0.85)';
+      ctx.shadowBlur = 20;
+      ctx.lineWidth = 14;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(px, py, 44, -Math.PI * 0.25, Math.PI * 1.25, false);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px, py - 56);
+      ctx.lineTo(px, py - 8);
+      ctx.stroke();
+      ctx.restore();
+
+      // Right: Optical Sensor Icon
+      drawSensorWaveIcon(ctx, cx + 140, H * 0.805, 0.96, elapsed, isScanning);
+
+      oledTexture.needsUpdate = true;
+    }
+
+    // =========================================================================
+    // 4. PARAMETRIC GEOMETRY UTILITIES (WATERTIGHT LOFTED SURFACES)
+    // =========================================================================
+
+    function smoothstep(edge0, edge1, x) {
+      const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+      return t * t * (3 - 2 * t);
+    }
+
+    function getIronHalfWidth(x) {
+      const xMin = -1.42;
+      const xMax = 1.28;
+      const t = Math.max(0, Math.min(1, (x - xMin) / (xMax - xMin)));
+      if (t <= 0) return 0.008;
+
+      if (t < 0.74) {
+        const u = t / 0.74;
+        return 0.008 + 0.592 * Math.pow(Math.sin(u * Math.PI * 0.5), 0.78);
+      } else {
+        const u = (t - 0.74) / 0.26;
+        return 0.60 - 0.115 * (0.5 - 0.5 * Math.cos(u * Math.PI));
+      }
+    }
+
+    function createLoftedGeometry(sections, closedV = true, capEnds = true, flipWinding = false) {
+      const N = sections.length;
+      const M = sections[0].length;
+      const positions = [];
+      const uvs = [];
+      const indices = [];
+
+      const ringStride = closedV ? M + 1 : M;
+
+      for (let i = 0; i < N; i++) {
+        const u = i / (N - 1);
+        for (let j = 0; j < ringStride; j++) {
+          const p = sections[i][j % M];
+          positions.push(p.x, p.y, p.z);
+          uvs.push(u, j / (ringStride - 1));
+        }
+      }
+
+      for (let i = 0; i < N - 1; i++) {
+        for (let j = 0; j < ringStride - 1; j++) {
+          const a = i * ringStride + j;
+          const b = (i + 1) * ringStride + j;
+          const c = (i + 1) * ringStride + (j + 1);
+          const d = i * ringStride + (j + 1);
+
+          if (!flipWinding) {
+            indices.push(a, b, d);
+            indices.push(b, c, d);
+          } else {
+            indices.push(a, d, b);
+            indices.push(b, d, c);
+          }
+        }
+      }
+
+      if (capEnds && closedV) {
+        const startCenter = new THREE.Vector3();
+        for (let j = 0; j < M; j++) startCenter.add(sections[0][j]);
+        startCenter.divideScalar(M);
+        const startCenterIdx = positions.length / 3;
+        positions.push(startCenter.x, startCenter.y, startCenter.z);
+        uvs.push(0.5, 0.5);
+
+        for (let j = 0; j < M; j++) {
+          const v1 = j;
+          const v2 = j + 1;
+          if (!flipWinding) indices.push(startCenterIdx, v2, v1);
+          else indices.push(startCenterIdx, v1, v2);
+        }
+
+        const endCenter = new THREE.Vector3();
+        for (let j = 0; j < M; j++) endCenter.add(sections[N - 1][j]);
+        endCenter.divideScalar(M);
+        const endCenterIdx = positions.length / 3;
+        positions.push(endCenter.x, endCenter.y, endCenter.z);
+        uvs.push(0.5, 0.5);
+
+        const base = (N - 1) * ringStride;
+        for (let j = 0; j < M; j++) {
+          const v1 = base + j;
+          const v2 = base + j + 1;
+          if (!flipWinding) indices.push(endCenterIdx, v1, v2);
+          else indices.push(endCenterIdx, v2, v1);
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+      return geo;
+    }
+
+    function createSweptTrimGeometry(curve, segments, widthFn, thicknessFn, normalBiasFn) {
+      const sections = [];
+      const radialPts = 14;
+      const frames = curve.computeFrenetFrames(segments, false);
+
+      for (let i = 0; i <= segments; i++) {
+        const t = i / segments;
+        const pt = curve.getPointAt(t);
+        const tangent = frames.tangents[i].clone().normalize();
+
+        let normal = normalBiasFn ? normalBiasFn(t, pt).clone().normalize() : frames.normals[i].clone();
+        normal.addScaledVector(tangent, -normal.dot(tangent)).normalize();
+        const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
+
+        const halfW = widthFn(t) * 0.5;
+        const halfT = thicknessFn(t) * 0.5;
+        const ring = [];
+
+        for (let j = 0; j < radialPts; j++) {
+          const ang = (j / radialPts) * Math.PI * 2;
+          const ca = Math.cos(ang);
+          const sa = Math.sin(ang);
+          const signC = Math.sign(ca);
+          const signS = Math.sign(sa);
+          const bx = signC * Math.pow(Math.abs(ca), 0.62) * halfW;
+          const ny = signS * Math.pow(Math.abs(sa), 0.62) * halfT;
+
+          const v = pt.clone()
+            .addScaledVector(binormal, bx)
+            .addScaledVector(normal, ny);
+          ring.push(v);
+        }
+        sections.push(ring);
+      }
+
+      const midI = Math.floor(segments / 2);
+      const p0 = sections[midI][0];
+      const pU = sections[midI + 1][0];
+      const pV = sections[midI][1];
+      const dU = pU.clone().sub(p0);
+      const dV = pV.clone().sub(p0);
+      const faceN = new THREE.Vector3().crossVectors(dU, dV);
+      const centerMid = curve.getPointAt(midI / segments);
+      const outDir = p0.clone().sub(centerMid);
+      const needsFlip = faceN.dot(outDir) < 0;
+
+      return createLoftedGeometry(sections, true, true, needsFlip);
+    }
+
+    // =========================================================================
+    // 5. BUILD THE EXACT SMART STEAM IRON 3D MODEL (ZERO KNOB + BOTTOM SENSOR)
+    // =========================================================================
+    function buildSmartSteamIron() {
+      ironGroup = new THREE.Group();
+      allIronMeshes = [];
+
+      const brushedTex = createBrushedMetalTexture(165, 32);
+      const brushedGoldTex = createBrushedMetalTexture(185, 22);
+      const rubberGripTex = createRubberGripTexture();
+      const cordTextures = createBraidedCordTextures();
+      const soleUndersideTex = createSoleplateUndersideTexture();
+
+      // 1. Brushed Silver / Titanium Soleplate & Lower Skirt Material
+      const brushedSilverMat = new THREE.MeshStandardMaterial({
+        color: 0xd4d9e0,
+        metalness: 0.88,
+        roughness: 0.28,
+        roughnessMap: brushedTex,
+        bumpMap: brushedTex,
+        bumpScale: 0.0022,
+        envMapIntensity: 1.38
+      });
+
+      const soleplateBottomMat = new THREE.MeshStandardMaterial({
+        color: 0xd8dde4,
+        map: soleUndersideTex,
+        metalness: 0.86,
+        roughness: 0.24,
+        bumpMap: soleUndersideTex,
+        bumpScale: 0.003,
+        envMapIntensity: 1.3
+      });
+
+      // 2. Signature Satin Brushed Rose-Gold / Champagne-Copper Trim Material
+      const roseGoldMat = new THREE.MeshPhysicalMaterial({
+        color: 0xdfa688,
+        metalness: 0.90,
+        roughness: 0.23,
+        roughnessMap: brushedGoldTex,
+        bumpMap: brushedGoldTex,
+        bumpScale: 0.0014,
+        clearcoat: 0.18,
+        clearcoatRoughness: 0.22,
+        envMapIntensity: 1.5
+      });
+
+      // 3. Glossy Piano-Black Clearcoat Main Body Material
+      const pianoBlackMat = new THREE.MeshPhysicalMaterial({
+        color: 0x0b0c10,
+        metalness: 0.12,
+        roughness: 0.13,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.055,
+        reflectivity: 0.95,
+        envMapIntensity: 1.4
+      });
+
+      // 4. Matte Textured Rubberized Charcoal Handle Grip Material
+      const rubberGripMat = new THREE.MeshStandardMaterial({
+        color: 0x16181d,
+        metalness: 0.05,
+        roughness: 0.80,
+        roughnessMap: rubberGripTex,
+        bumpMap: rubberGripTex,
+        bumpScale: 0.0055,
+        envMapIntensity: 0.7
+      });
+
+      // 5. Recessed Dark Seam / Vent / Strain Relief Rubber Material
+      const darkRubberMat = new THREE.MeshStandardMaterial({
+        color: 0x0e1014,
+        metalness: 0.08,
+        roughness: 0.56,
+        envMapIntensity: 0.8
+      });
+
+      const deepVentMat = new THREE.MeshStandardMaterial({
+        color: 0x060709,
+        metalness: 0.2,
+        roughness: 0.75
+      });
+
+      // 6. Braided Fabric Power Cord Material
+      const braidedCordMat = new THREE.MeshStandardMaterial({
+        map: cordTextures.map,
+        bumpMap: cordTextures.bumpMap,
+        bumpScale: 0.008,
+        roughness: 0.85,
+        metalness: 0.04
+      });
+
+      // 7. Curved OLED Display Glass Material
+      oledMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x06080c,
+        map: oledTexture,
+        emissive: new THREE.Color(0xffffff),
+        emissiveMap: oledTexture,
+        emissiveIntensity: 1.35,
+        roughness: 0.08,
+        metalness: 0.05,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.03,
+        envMapIntensity: 1.35
+      });
+
+      // 8. Front Glowing Electric-Blue Chevron LED Lens Material
+      blueLedMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x00aaff,
+        emissive: new THREE.Color(0x009dff),
+        emissiveIntensity: 1.75,
+        roughness: 0.1,
+        metalness: 0.0,
+        transmission: 0.35,
+        transparent: true,
+        opacity: 0.94,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.05
+      });
+
+      blueLedCoreMaterial = new THREE.MeshStandardMaterial({
+        color: 0x99eeff,
+        emissive: new THREE.Color(0x44d8ff),
+        emissiveIntensity: 2.7,
+        roughness: 0.2
+      });
+
+      const addPart = (mesh, castShadow = true, receiveShadow = true) => {
+        mesh.castShadow = castShadow;
+        mesh.receiveShadow = receiveShadow;
+        ironGroup.add(mesh);
+        allIronMeshes.push(mesh);
+        return mesh;
+      };
+
+      // =======================================================================
+      // PART A: SMART SOLEPLATE + VENTS + 4 SENSOR HOLES + OPTICAL FABRIC SENSOR
+      // =======================================================================
+      const soleShape = new THREE.Shape();
+      const soleStart = -1.42;
+      const soleEnd = 0.88;
+      const soleSteps = 72;
+
+      const soleHalfW = (x) => {
+        const baseW = getIronHalfWidth(x);
+        if (x > 0.62) {
+          const t = Math.min(1, (x - 0.62) / (soleEnd - 0.62));
+          return baseW * Math.sqrt(Math.max(0.001, 1 - t * t));
+        }
+        return baseW;
+      };
+
+      soleShape.moveTo(soleStart, 0);
+      for (let i = 1; i <= soleSteps; i++) {
+        const x = soleStart + (soleEnd - soleStart) * (i / soleSteps);
+        soleShape.lineTo(x, soleHalfW(x));
+      }
+      for (let i = soleSteps - 1; i >= 0; i--) {
+        const x = soleStart + (soleEnd - soleStart) * (i / soleSteps);
+        soleShape.lineTo(x, -soleHalfW(x));
+      }
+      soleShape.closePath();
+
+      const soleGeo = new THREE.ExtrudeGeometry(soleShape, {
+        depth: 0.036,
+        bevelEnabled: true,
+        bevelThickness: 0.011,
+        bevelSize: 0.011,
+        bevelSegments: 5,
+        curveSegments: 32
+      });
+      soleGeo.rotateX(-Math.PI / 2);
+      soleGeo.translate(0, 0.011, 0);
+      addPart(new THREE.Mesh(soleGeo, brushedSilverMat));
+
+      const undersideGeo = new THREE.ShapeGeometry(soleShape, 36);
+      undersideGeo.rotateX(Math.PI / 2);
+      const uPos = undersideGeo.attributes.position;
+      const uUv = undersideGeo.attributes.uv;
+      for (let i = 0; i < uPos.count; i++) {
+        const px = uPos.getX(i);
+        const pz = uPos.getZ(i);
+        uUv.setXY(i, (px - soleStart) / (soleEnd - soleStart), (pz + 0.62) / 1.24);
+      }
+      const undersideMesh = new THREE.Mesh(undersideGeo, soleplateBottomMat);
+      undersideMesh.position.y = -0.0004;
+      addPart(undersideMesh, false, true);
+
+      // Recessed Steam Vents on Soleplate Underside
+      const ventGeo = new THREE.CylinderGeometry(0.018, 0.015, 0.008, 16);
+      const smallVentGeo = new THREE.CylinderGeometry(0.012, 0.010, 0.008, 14);
+      const sensorRingGeo = new THREE.TorusGeometry(0.032, 0.0055, 10, 24);
+      sensorRingGeo.rotateX(Math.PI / 2);
+      const sensorCoreGeo = new THREE.CylinderGeometry(0.027, 0.027, 0.008, 20);
+
+      for (let i = 0; i < 10; i++) {
+        const frac = i / 9;
+        const vx = -1.16 + frac * 1.72;
+        const vz = soleHalfW(vx) * 0.72;
+        for (const side of [-1, 1]) {
+          const vent = new THREE.Mesh(i < 2 ? smallVentGeo : ventGeo, deepVentMat);
+          vent.position.set(vx, 0.002, side * vz);
+          addPart(vent, false, false);
+        }
+      }
+      for (const nx of [-1.24, -1.12, -0.98]) {
+        const vCenter = new THREE.Mesh(smallVentGeo, deepVentMat);
+        vCenter.position.set(nx, 0.002, 0);
+        addPart(vCenter, false, false);
+      }
+      for (let i = 0; i < 4; i++) {
+        const vx = -0.82 + i * 0.28;
+        const vz = 0.13 + i * 0.045;
+        for (const side of [-1, 1]) {
+          const vInner = new THREE.Mesh(smallVentGeo, deepVentMat);
+          vInner.position.set(vx, 0.002, side * vz);
+          addPart(vInner, false, false);
+        }
+      }
+
+      // 4 Smart Temperature/Glide Sensor Holes positioned cleanly around the Optical Sensor Module
+      const sensorCoords = [
+        [-0.78, 0.0],
+        [0.06, 0.21],
+        [0.06, -0.21],
+        [0.48, 0.0]
+      ];
+      for (const [sx, sz] of sensorCoords) {
+        const core = new THREE.Mesh(sensorCoreGeo, deepVentMat);
+        core.position.set(sx, 0.002, sz);
+        addPart(core, false, false);
+
+        const ring = new THREE.Mesh(sensorRingGeo, roseGoldMat);
+        ring.position.set(sx, 0.0002, sz);
+        addPart(ring, false, false);
+      }
+
+      // EMBEDDED BOTTOM OPTICAL/IR FABRIC-DETECTION SENSOR MODULE (x = -0.35, y = 0.001, z = 0)
+      const sensorModuleGroup = new THREE.Group();
+      sensorModuleGroup.position.set(-0.35, 0.001, 0.0);
+
+      // 1. Champagne Rose-Gold Chamfered Bezel Ring
+      const opticalBezelGeo = new THREE.TorusGeometry(0.105, 0.015, 16, 40);
+      opticalBezelGeo.rotateX(Math.PI / 2);
+      const opticalBezel = new THREE.Mesh(opticalBezelGeo, roseGoldMat);
+      opticalBezel.position.y = -0.002;
+      sensorModuleGroup.add(opticalBezel);
+      allIronMeshes.push(opticalBezel);
+
+      // 2. Recessed Dark Cavity Housing
+      const opticalCavity = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.095, 0.095, 0.012, 32),
+        deepVentMat
+      );
+      opticalCavity.position.y = 0.003;
+      sensorModuleGroup.add(opticalCavity);
+
+      // 3. Dark Sapphire Optical Lens Dome
+      const sapphireLensMat = new THREE.MeshPhysicalMaterial({
+        color: 0x051424,
+        metalness: 0.14,
+        roughness: 0.04,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.02,
+        reflectivity: 1.0,
+        envMapIntensity: 1.85
+      });
+      const sapphireLens = new THREE.Mesh(
+        new THREE.SphereGeometry(0.066, 28, 16, 0, Math.PI * 2, Math.PI * 0.55, Math.PI * 0.45),
+        sapphireLensMat
+      );
+      sapphireLens.scale.set(1.0, 0.36, 1.0);
+      sapphireLens.position.y = 0.003;
+      sensorModuleGroup.add(sapphireLens);
+
+      // 4. Glowing Cyan Micro-LED Emitter Ring
+      sensorRingMat = new THREE.MeshStandardMaterial({
+        color: 0x38e2ff,
+        emissive: new THREE.Color(0x00c8ff),
+        emissiveIntensity: 1.2,
+        roughness: 0.18
+      });
+      const microLedGeo = new THREE.TorusGeometry(0.080, 0.008, 12, 36);
+      microLedGeo.rotateX(Math.PI / 2);
+      const microLedMesh = new THREE.Mesh(microLedGeo, sensorRingMat);
+      microLedMesh.position.y = -0.0035;
+      sensorModuleGroup.add(microLedMesh);
+
+      // 5. Two Flanking IR Sensor Diodes
+      sensorIrMat = new THREE.MeshStandardMaterial({
+        color: 0x7ef3ff,
+        emissive: new THREE.Color(0x00b0ff),
+        emissiveIntensity: 1.1,
+        roughness: 0.16
+      });
+      const irRingGeo = new THREE.TorusGeometry(0.025, 0.005, 10, 22);
+      irRingGeo.rotateX(Math.PI / 2);
+      const irDiodeGeo = new THREE.CylinderGeometry(0.017, 0.017, 0.008, 18);
+
+      for (const side of [-1, 1]) {
+        const irRing = new THREE.Mesh(irRingGeo, brushedSilverMat);
+        irRing.position.set(0.0, -0.0015, side * 0.155);
+        sensorModuleGroup.add(irRing);
+
+        const irDiode = new THREE.Mesh(irDiodeGeo, sensorIrMat);
+        irDiode.position.set(0.0, -0.002, side * 0.155);
+        sensorModuleGroup.add(irDiode);
+      }
+
+      // 6. Downward-Pointing Volumetric Glowing Cyan Scanning Light Cone (ConeGeometry)
+      // Unit height 1.0 -> apex at +0.5, circular base at -0.5; scaled dynamically to cloth distance
+      const beamTex = createScanBeamTexture();
+      sensorBeamMat = new THREE.MeshBasicMaterial({
+        map: beamTex,
+        color: 0x22d3ee,
+        transparent: true,
+        opacity: 0.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      const coneGeo = new THREE.ConeGeometry(0.35, 1.0, 36, 1, true);
+      sensorBeamMesh = new THREE.Mesh(coneGeo, sensorBeamMat);
+      sensorBeamMesh.position.set(0, -0.1, 0);
+      sensorBeamMesh.visible = false;
+      sensorModuleGroup.add(sensorBeamMesh);
+
+      // 7. Subtle Cyan PointLight Beneath Soleplate Illuminating Cloth During Sensing
+      sensorPointLight = new THREE.PointLight(0x00ccff, 0.0, 1.8, 1.7);
+      sensorPointLight.position.set(0, -0.08, 0);
+      sensorModuleGroup.add(sensorPointLight);
+
+      ironGroup.add(sensorModuleGroup);
+
+      // Dark Shadow Seam Gasket directly between soleplate and brushed silver skirt
+      const seamGeo = new THREE.ExtrudeGeometry(soleShape, {
+        depth: 0.042,
+        bevelEnabled: false,
+        curveSegments: 28
+      });
+      seamGeo.rotateX(-Math.PI / 2);
+      seamGeo.scale(0.972, 1.0, 0.942);
+      seamGeo.translate(-0.01, 0.052, 0);
+      addPart(new THREE.Mesh(seamGeo, darkRubberMat));
+
+      // =======================================================================
+      // PART B: LOWER BRUSHED SILVER METALLIC SKIRT (SCULPTED LOFTED WEDGE)
+      // =======================================================================
+      const skirtSections = [];
+      const skirtU = 64;
+      const skirtV = 36;
+
+      const skirtYBot = (x) => {
+        if (x < 0.14) return 0.082;
+        const t = smoothstep(0.14, 1.18, x);
+        return 0.082 + t * 0.215;
+      };
+
+      const skirtYTop = (x) => {
+        const tFront = smoothstep(-1.42, 0.0, x);
+        const tRear = smoothstep(-0.15, 1.18, x);
+        return 0.148 + tFront * 0.105 + tRear * 0.165;
+      };
+
+      for (let i = 0; i <= skirtU; i++) {
+        const u = i / skirtU;
+        const x = -1.425 + u * (1.18 - (-1.425));
+        const hwBase = getIronHalfWidth(x) * (1.015 - 0.025 * smoothstep(0.7, 1.0, u));
+        const yB = skirtYBot(x);
+        const yT = skirtYTop(x);
+        const yMid = (yB + yT) * 0.5;
+        const hHalf = (yT - yB) * 0.5;
+
+        const ring = [];
+        for (let j = 0; j < skirtV; j++) {
+          const theta = -Math.PI / 2 + (j / skirtV) * Math.PI * 2;
+          const sinT = Math.sin(theta);
+          const cosT = Math.cos(theta);
+
+          const yNorm = Math.sign(sinT) * Math.pow(Math.abs(sinT), 0.72);
+          const y = yMid + hHalf * yNorm;
+
+          const heightFrac = (yNorm + 1) * 0.5;
+          const zShape = Math.sign(cosT) * Math.pow(Math.abs(cosT), 0.65);
+          const bulge = 1.0 + 0.025 * Math.sin(heightFrac * Math.PI);
+          const tumble = 1.0 - 0.075 * heightFrac;
+          const z = hwBase * zShape * bulge * tumble;
+
+          ring.push(new THREE.Vector3(x, y, z));
+        }
+        skirtSections.push(ring);
+      }
+      addPart(new THREE.Mesh(createLoftedGeometry(skirtSections, true, true, false), brushedSilverMat));
+
+      // =======================================================================
+      // PART C: GLOSSY PIANO-BLACK MAIN BODY (LOWER TANK HULL — ZERO KNOB!)
+      // =======================================================================
+      const hullSections = [];
+      const hullU = 68;
+      const hullV = 40;
+
+      const hullYTop = (x) => {
+        if (x < -0.55) {
+          const t = smoothstep(-1.34, -0.55, x);
+          return 0.165 + t * 0.345;
+        } else if (x < 0.58) {
+          const t = smoothstep(-0.55, 0.58, x);
+          return 0.51 + t * 0.14;
+        } else {
+          const t = smoothstep(0.58, 1.02, x);
+          const tTail = smoothstep(1.02, 1.24, x);
+          return 0.65 + t * 0.44 - tTail * 0.68;
+        }
+      };
+
+      const hullYBot = (x) => {
+        if (x < 0.48) return 0.11;
+        const t = smoothstep(0.48, 1.24, x);
+        return 0.11 + t * t * 0.17;
+      };
+
+      for (let i = 0; i <= hullU; i++) {
+        const u = i / hullU;
+        const x = -1.34 + u * (1.24 - (-1.34));
+        const hw = getIronHalfWidth(x) * 0.945;
+        const yB = hullYBot(x);
+        const yT = Math.max(yB + 0.08, hullYTop(x));
+        const yMid = (yB + yT) * 0.5;
+        const hHalf = (yT - yB) * 0.5;
+
+        const ring = [];
+        for (let j = 0; j < hullV; j++) {
+          const theta = -Math.PI / 2 + (j / hullV) * Math.PI * 2;
+          const sinT = Math.sin(theta);
+          const cosT = Math.cos(theta);
+
+          const yNorm = Math.sign(sinT) * Math.pow(Math.abs(sinT), 0.78);
+          const y = yMid + hHalf * yNorm;
+          const hFrac = (yNorm + 1) * 0.5;
+
+          const taper = 1.0 - 0.36 * Math.pow(hFrac, 1.35);
+          const zShape = Math.sign(cosT) * Math.pow(Math.abs(cosT), 0.72);
+          const z = hw * zShape * taper;
+
+          ring.push(new THREE.Vector3(x, y, z));
+        }
+        hullSections.push(ring);
+      }
+      addPart(new THREE.Mesh(createLoftedGeometry(hullSections, true, true, false), pianoBlackMat));
+
+      // No manual knob or circular dial under the handle — sleek uninterrupted piano-black deck.
+
+      // =======================================================================
+      // PART D: FRONT SLOPED PILLAR (NOSE SLOPE & OLED DISPLAY HOUSING)
+      // =======================================================================
+      const frontPillarSections = [];
+      const fpU = 40;
+      const fpV = 36;
+
+      const frontOuterCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-1.31, 0.18, 0),
+        new THREE.Vector3(-1.06, 0.42, 0),
+        new THREE.Vector3(-0.74, 0.78, 0),
+        new THREE.Vector3(-0.44, 1.08, 0),
+        new THREE.Vector3(-0.22, 1.22, 0)
+      ]);
+
+      const frontInnerCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.56, 0.36, 0),
+        new THREE.Vector3(-0.48, 0.56, 0),
+        new THREE.Vector3(-0.41, 0.76, 0),
+        new THREE.Vector3(-0.29, 0.94, 0),
+        new THREE.Vector3(-0.15, 1.05, 0)
+      ]);
+
+      for (let i = 0; i <= fpU; i++) {
+        const t = i / fpU;
+        const pOut = frontOuterCurve.getPointAt(t);
+        const pIn = frontInnerCurve.getPointAt(t);
+        const center = pOut.clone().add(pIn).multiplyScalar(0.5);
+        const halfAxis = pOut.clone().sub(pIn).multiplyScalar(0.5);
+
+        const hw = 0.085 + 0.215 * Math.sin(Math.pow(t, 0.78) * Math.PI * 0.84) + 0.045 * t;
+        const ring = [];
+        for (let j = 0; j < fpV; j++) {
+          const ang = (j / fpV) * Math.PI * 2;
+          const ca = Math.cos(ang);
+          const sa = Math.sin(ang);
+
+          const xOut = Math.sign(ca) * Math.pow(Math.abs(ca), 0.75);
+          const zSide = Math.sign(sa) * Math.pow(Math.abs(sa), 0.80);
+          const widthMod = ca > 0 ? 1.0 : 0.82;
+
+          const pt = center.clone().addScaledVector(halfAxis, xOut);
+          pt.z = zSide * hw * widthMod;
+          ring.push(pt);
+        }
+        frontPillarSections.push(ring);
+      }
+
+      const fpGeo = createLoftedGeometry(frontPillarSections, true, true, true);
+      addPart(new THREE.Mesh(fpGeo, pianoBlackMat));
+
+      // =======================================================================
+      // PART E: REAR HEEL PILLAR & FLAT GLOSSY BLACK REAR HEEL SHIELD
+      // =======================================================================
+      const rearPillarSections = [];
+      const rpU = 36;
+      const rpV = 36;
+
+      const rearOuterCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(1.23, 0.27, 0),
+        new THREE.Vector3(1.16, 0.56, 0),
+        new THREE.Vector3(1.06, 0.87, 0),
+        new THREE.Vector3(0.94, 1.18, 0)
+      ]);
+
+      const rearInnerCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.48, 0.44, 0),
+        new THREE.Vector3(0.56, 0.66, 0),
+        new THREE.Vector3(0.62, 0.88, 0),
+        new THREE.Vector3(0.68, 1.05, 0)
+      ]);
+
+      for (let i = 0; i <= rpU; i++) {
+        const t = i / rpU;
+        const pOut = rearOuterCurve.getPointAt(t);
+        const pIn = rearInnerCurve.getPointAt(t);
+        const center = pOut.clone().add(pIn).multiplyScalar(0.5);
+        const halfAxis = pOut.clone().sub(pIn).multiplyScalar(0.5);
+
+        const hw = 0.485 * (1 - t) + 0.215 * t + 0.03 * Math.sin(t * Math.PI);
+
+        const ring = [];
+        for (let j = 0; j < rpV; j++) {
+          const ang = (j / rpV) * Math.PI * 2;
+          const ca = Math.cos(ang);
+          const sa = Math.sin(ang);
+
+          const xAxis = ca > 0
+            ? Math.pow(ca, 0.42)
+            : -Math.pow(Math.abs(ca), 0.85);
+          const zSide = Math.sign(sa) * Math.pow(Math.abs(sa), ca > 0 ? 0.58 : 0.82);
+          const wMod = ca > 0 ? 1.0 : 0.64;
+
+          const pt = center.clone().addScaledVector(halfAxis, xAxis);
+          pt.z = zSide * hw * wMod;
+          ring.push(pt);
+        }
+        rearPillarSections.push(ring);
+      }
+      addPart(new THREE.Mesh(createLoftedGeometry(rearPillarSections, true, true, false), pianoBlackMat));
+
+      const shieldShape = new THREE.Shape();
+      shieldShape.moveTo(-0.34, 0.0);
+      shieldShape.quadraticCurveTo(-0.46, 0.02, -0.45, 0.14);
+      shieldShape.lineTo(-0.22, 0.84);
+      shieldShape.quadraticCurveTo(-0.19, 0.92, -0.09, 0.93);
+      shieldShape.lineTo(0.09, 0.93);
+      shieldShape.quadraticCurveTo(0.19, 0.92, 0.22, 0.84);
+      shieldShape.lineTo(0.45, 0.14);
+      shieldShape.quadraticCurveTo(0.46, 0.02, 0.34, 0.0);
+      shieldShape.closePath();
+
+      const shieldGeo = new THREE.ExtrudeGeometry(shieldShape, {
+        depth: 0.06,
+        bevelEnabled: true,
+        bevelThickness: 0.015,
+        bevelSize: 0.015,
+        bevelSegments: 4
+      });
+      shieldGeo.rotateY(Math.PI / 2);
+      const shieldMesh = new THREE.Mesh(shieldGeo, pianoBlackMat);
+      shieldMesh.position.set(1.205, 0.275, 0);
+      shieldMesh.rotation.z = 0.305;
+      addPart(shieldMesh);
+
+      // =======================================================================
+      // PART F: ERGONOMIC CLOSED-LOOP HANDLE (RUBBER GRIP + ROSE-GOLD TOP SPINE)
+      // =======================================================================
+      const handleU = 44;
+
+      const handleTopCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.26, 1.225, 0),
+        new THREE.Vector3(-0.02, 1.295, 0),
+        new THREE.Vector3(0.26, 1.325, 0),
+        new THREE.Vector3(0.56, 1.295, 0),
+        new THREE.Vector3(0.845, 1.215, 0)
+      ]);
+
+      const handleBotCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.25, 0.96, 0),
+        new THREE.Vector3(-0.02, 1.055, 0),
+        new THREE.Vector3(0.26, 1.088, 0),
+        new THREE.Vector3(0.54, 1.062, 0),
+        new THREE.Vector3(0.75, 0.985, 0)
+      ]);
+
+      // 1. Matte Textured Rubberized Charcoal Underside & Inner Grip
+      const gripSections = [];
+      const gripV = 32;
+      for (let i = 0; i <= handleU; i++) {
+        const t = i / handleU;
+        const pTop = handleTopCurve.getPointAt(t);
+        const pBot = handleBotCurve.getPointAt(t);
+
+        const seamY = pBot.y + (pTop.y - pBot.y) * 0.72;
+        const cy = (pBot.y + seamY) * 0.5;
+        const hh = (seamY - pBot.y) * 0.5;
+        const cx = (pTop.x + pBot.x) * 0.5;
+
+        const hw = 0.168 + 0.022 * Math.sin(t * Math.PI) + 0.02 * (1 - t);
+
+        const ring = [];
+        for (let j = 0; j < gripV; j++) {
+          const theta = -Math.PI / 2 + (j / gripV) * Math.PI * 2;
+          const sinT = Math.sin(theta);
+          const cosT = Math.cos(theta);
+
+          const y = cy + hh * sinT;
+          const gripWidthMod = sinT < 0 ? 0.88 + 0.12 * (1 + sinT) : 1.0;
+          const z = hw * Math.sign(cosT) * Math.pow(Math.abs(cosT), 0.78) * gripWidthMod;
+          ring.push(new THREE.Vector3(cx, y, z));
+        }
+        gripSections.push(ring);
+      }
+      addPart(new THREE.Mesh(createLoftedGeometry(gripSections, true, true, false), rubberGripMat));
+
+      // 2. Sculpted Rose-Gold Top Handle Spine
+      const spineSections = [];
+      const spineV = 28;
+      for (let i = 0; i <= handleU; i++) {
+        const t = i / handleU;
+        const pTop = handleTopCurve.getPointAt(t);
+        const pBot = handleBotCurve.getPointAt(t);
+
+        const seamY = pBot.y + (pTop.y - pBot.y) * 0.56;
+        const cy = (seamY + pTop.y) * 0.5;
+        const hh = (pTop.y - seamY) * 0.5;
+
+        const hw = 0.184 + 0.032 * Math.pow(1 - t, 1.8) + 0.014 * Math.pow(t, 2.0);
+
+        const ring = [];
+        for (let j = 0; j < spineV; j++) {
+          const theta = -Math.PI / 2 + (j / spineV) * Math.PI * 2;
+          const sinT = Math.sin(theta);
+          const cosT = Math.cos(theta);
+
+          const yNorm = sinT > 0 ? Math.pow(sinT, 0.68) : -Math.pow(Math.abs(sinT), 1.15) * 0.55;
+          const y = cy + hh * yNorm;
+          const z = hw * Math.sign(cosT) * Math.pow(Math.abs(cosT), 0.70);
+          ring.push(new THREE.Vector3(pTop.x, y, z));
+        }
+        spineSections.push(ring);
+      }
+      addPart(new THREE.Mesh(createLoftedGeometry(spineSections, true, true, false), roseGoldMat));
+
+      // Dark Panel Seam Divider between Top Handle Spine and Rear Rose-Gold Collar
+      const seamDivCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.848, 1.135, -0.205),
+        new THREE.Vector3(0.854, 1.216, -0.105),
+        new THREE.Vector3(0.856, 1.224, 0.0),
+        new THREE.Vector3(0.854, 1.216, 0.105),
+        new THREE.Vector3(0.848, 1.135, 0.205)
+      ]);
+      addPart(new THREE.Mesh(new THREE.TubeGeometry(seamDivCurve, 24, 0.011, 10, false), darkRubberMat));
+
+      // =======================================================================
+      // PART G: SIGNATURE ROSE-GOLD TRIM (FRONT V-RAILS + REAR FRAME & BOOMERANG)
+      // =======================================================================
+      for (const side of [-1, 1]) {
+        const vRailCurve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(-0.23, 1.205, side * 0.172),
+          new THREE.Vector3(-0.42, 1.075, side * 0.238),
+          new THREE.Vector3(-0.66, 0.845, side * 0.258),
+          new THREE.Vector3(-0.90, 0.575, side * 0.218),
+          new THREE.Vector3(-1.11, 0.345, side * 0.148),
+          new THREE.Vector3(-1.265, 0.205, side * 0.075)
+        ]);
+
+        const vRailGeo = createSweptTrimGeometry(
+          vRailCurve,
+          44,
+          (t) => 0.068 - 0.026 * t,
+          (t) => 0.036 - 0.010 * t,
+          () => new THREE.Vector3(-0.55, 0.55, side * 0.62)
+        );
+        addPart(new THREE.Mesh(vRailGeo, roseGoldMat));
+      }
+
+      const rearCollarCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.90, 1.155, -0.228),
+        new THREE.Vector3(0.915, 1.198, -0.115),
+        new THREE.Vector3(0.922, 1.208, 0.0),
+        new THREE.Vector3(0.915, 1.198, 0.115),
+        new THREE.Vector3(0.90, 1.155, 0.228)
+      ]);
+      const rearCollarGeo = createSweptTrimGeometry(
+        rearCollarCurve,
+        28,
+        () => 0.115,
+        () => 0.055,
+        () => new THREE.Vector3(0.35, 0.92, 0)
+      );
+      addPart(new THREE.Mesh(rearCollarGeo, roseGoldMat));
+
+      for (const side of [-1, 1]) {
+        const boomerangCurve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(0.905, 1.160, side * 0.215),
+          new THREE.Vector3(1.015, 0.885, side * 0.345),
+          new THREE.Vector3(1.115, 0.615, side * 0.455),
+          new THREE.Vector3(1.182, 0.395, side * 0.515),
+          new THREE.Vector3(1.130, 0.350, side * 0.538),
+          new THREE.Vector3(0.860, 0.345, side * 0.576),
+          new THREE.Vector3(0.500, 0.312, side * 0.592),
+          new THREE.Vector3(0.080, 0.265, side * 0.556),
+          new THREE.Vector3(-0.340, 0.218, side * 0.462)
+        ]);
+
+        const boomGeo = createSweptTrimGeometry(
+          boomerangCurve,
+          64,
+          (t) => {
+            if (t < 0.46) return 0.105;
+            if (t < 0.65) return 0.105 - 0.03 * ((t - 0.46) / 0.19);
+            return Math.max(0.012, 0.075 * (1 - (t - 0.65) / 0.35));
+          },
+          (t) => (t < 0.55 ? 0.048 : Math.max(0.012, 0.048 * (1 - (t - 0.55) / 0.45))),
+          (t) => {
+            const rearMix = 1.0 - smoothstep(0.35, 0.62, t);
+            return new THREE.Vector3(0.55 * rearMix, 0.15, side * (0.82 + 0.18 * (1 - rearMix)));
+          }
+        );
+        addPart(new THREE.Mesh(boomGeo, roseGoldMat));
+      }
+
+      // =======================================================================
+      // PART H: LARGE CURVED OVAL OLED TEMPERATURE DISPLAY (FLUSH GLASS PANEL)
+      // =======================================================================
+      const oledSegU = 32;
+      const oledSegV = 32;
+      const oledPositions = [];
+      const oledUvs = [];
+      const oledIndices = [];
+
+      const oledCenterCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.27, 1.195, 0),
+        new THREE.Vector3(-0.46, 1.055, 0),
+        new THREE.Vector3(-0.68, 0.835, 0),
+        new THREE.Vector3(-0.88, 0.610, 0),
+        new THREE.Vector3(-1.02, 0.445, 0)
+      ]);
+
+      for (let i = 0; i <= oledSegU; i++) {
+        const uNorm = i / oledSegU;
+        const uSigned = uNorm * 2 - 1;
+
+        const pt = oledCenterCurve.getPointAt(uNorm);
+        const tangent = oledCenterCurve.getTangentAt(uNorm).normalize();
+        const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+        if (normal.y < 0) normal.negate();
+
+        const ovalProfile = Math.sqrt(Math.max(0, 1 - uSigned * uSigned));
+        const teardropScale = 1.0 - 0.14 * uSigned;
+        const maxHalfW = 0.228 * ovalProfile * teardropScale;
+
+        for (let j = 0; j <= oledSegV; j++) {
+          const vNorm = j / oledSegV;
+          const vSigned = vNorm * 2 - 1;
+
+          const domeOffset = 0.018 + 0.022 * (1 - vSigned * vSigned) * ovalProfile;
+          const z = vSigned * maxHalfW;
+
+          const p = pt.clone().addScaledVector(normal, domeOffset);
+          p.z = z;
+
+          oledPositions.push(p.x, p.y, p.z);
+          oledUvs.push(1.0 - vNorm, 1.0 - uNorm);
+        }
+      }
+
+      for (let i = 0; i < oledSegU; i++) {
+        for (let j = 0; j < oledSegV; j++) {
+          const a = i * (oledSegV + 1) + j;
+          const b = (i + 1) * (oledSegV + 1) + j;
+          const c = (i + 1) * (oledSegV + 1) + (j + 1);
+          const d = i * (oledSegV + 1) + (j + 1);
+          oledIndices.push(a, d, b);
+          oledIndices.push(b, d, c);
+        }
+      }
+
+      const oledGeo = new THREE.BufferGeometry();
+      oledGeo.setAttribute('position', new THREE.Float32BufferAttribute(oledPositions, 3));
+      oledGeo.setAttribute('uv', new THREE.Float32BufferAttribute(oledUvs, 2));
+      oledGeo.setIndex(oledIndices);
+      oledGeo.computeVertexNormals();
+      addPart(new THREE.Mesh(oledGeo, oledMaterial), false, true);
+
+      // =======================================================================
+      // PART I: FRONT GLOWING BLUE TIP LED CHEVRON & SPRAY NOZZLE
+      // =======================================================================
+      const ledChevronCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-1.245, 0.195, -0.088),
+        new THREE.Vector3(-1.335, 0.175, -0.052),
+        new THREE.Vector3(-1.392, 0.162, 0.0),
+        new THREE.Vector3(-1.335, 0.175, 0.052),
+        new THREE.Vector3(-1.245, 0.195, 0.088)
+      ]);
+
+      const ledOuterGeo = createSweptTrimGeometry(
+        ledChevronCurve,
+        28,
+        (t) => 0.068 + 0.022 * Math.sin(t * Math.PI),
+        (t) => 0.044 + 0.012 * Math.sin(t * Math.PI),
+        () => new THREE.Vector3(-0.75, 0.65, 0)
+      );
+      addPart(new THREE.Mesh(ledOuterGeo, blueLedMaterial), false, false);
+
+      const ledCoreGeo = new THREE.TubeGeometry(ledChevronCurve, 24, 0.016, 10, false);
+      const ledCoreMesh = new THREE.Mesh(ledCoreGeo, blueLedCoreMaterial);
+      ledCoreMesh.position.set(0.008, 0.0, 0);
+      addPart(ledCoreMesh, false, false);
+
+      tipPointLight = new THREE.PointLight(0x00aaff, 1.25, 1.65, 1.8);
+      tipPointLight.position.set(-1.46, 0.17, 0.0);
+      ironGroup.add(tipPointLight);
+
+      const nozzleGroup = new THREE.Group();
+      const nozzleBody = new THREE.Mesh(new THREE.SphereGeometry(0.052, 20, 16), pianoBlackMat);
+      nozzleBody.scale.set(1.25, 0.72, 0.88);
+      nozzleGroup.add(nozzleBody);
+
+      const nozzleTip = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.025, 14), brushedSilverMat);
+      nozzleTip.rotation.z = Math.PI / 2 - 0.35;
+      nozzleTip.position.set(-0.048, -0.012, 0);
+      nozzleGroup.add(nozzleTip);
+
+      nozzleGroup.position.set(-1.165, 0.278, 0);
+      nozzleGroup.rotation.z = -0.68;
+      ironGroup.add(nozzleGroup);
+      allIronMeshes.push(nozzleBody, nozzleTip);
+
+      // =======================================================================
+      // PART J: RIBBED STRAIN RELIEF BOOT & BRAIDED POWER CORD
+      // =======================================================================
+      const bootCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.935, 1.135, 0.0),
+        new THREE.Vector3(1.045, 1.225, 0.0),
+        new THREE.Vector3(1.165, 1.305, 0.005),
+        new THREE.Vector3(1.265, 1.345, 0.012)
+      ]);
+
+      const bootCoreSections = [];
+      const bootSteps = 18;
+      const bootFrames = bootCurve.computeFrenetFrames(bootSteps, false);
+      for (let i = 0; i <= bootSteps; i++) {
+        const t = i / bootSteps;
+        const p = bootCurve.getPointAt(t);
+        const n = bootFrames.normals[i];
+        const b = bootFrames.binormals[i];
+        const rad = 0.088 * (1 - t) + 0.048 * t;
+        const ring = [];
+        for (let j = 0; j < 18; j++) {
+          const ang = (j / 18) * Math.PI * 2;
+          ring.push(
+            p.clone()
+              .addScaledVector(n, Math.cos(ang) * rad)
+              .addScaledVector(b, Math.sin(ang) * rad)
+          );
+        }
+        bootCoreSections.push(ring);
+      }
+      addPart(new THREE.Mesh(createLoftedGeometry(bootCoreSections, true, true, false), darkRubberMat));
+
+      const ribCount = 7;
+      for (let r = 0; r < ribCount; r++) {
+        const t = 0.08 + (r / (ribCount - 1)) * 0.84;
+        const pos = bootCurve.getPointAt(t);
+        const tangent = bootCurve.getTangentAt(t).normalize();
+
+        const majorR = 0.095 * (1 - t) + 0.054 * t;
+        const tubeR = 0.0155 - 0.004 * t;
+        const ribGeo = new THREE.TorusGeometry(majorR, tubeR, 12, 24);
+        const ribMesh = new THREE.Mesh(ribGeo, darkRubberMat);
+        ribMesh.position.copy(pos);
+
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+        ribMesh.quaternion.copy(quat);
+        addPart(ribMesh);
+      }
+
+      const cordCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(1.245, 1.338, 0.010),
+        new THREE.Vector3(1.400, 1.365, 0.025),
+        new THREE.Vector3(1.565, 1.240, 0.055),
+        new THREE.Vector3(1.685, 0.940, 0.095),
+        new THREE.Vector3(1.780, 0.480, 0.130),
+        new THREE.Vector3(1.885, 0.115, 0.145),
+        new THREE.Vector3(2.060, 0.044, 0.135),
+        new THREE.Vector3(2.340, 0.044, 0.085)
+      ]);
+      const cordGeo = new THREE.TubeGeometry(cordCurve, 96, 0.044, 20, false);
+      addPart(new THREE.Mesh(cordGeo, braidedCordMat));
+
+      const cordEndPos = cordCurve.getPointAt(1.0);
+      const cordEndTan = cordCurve.getTangentAt(1.0).normalize();
+      const capGeo = new THREE.CylinderGeometry(0.046, 0.046, 0.07, 18);
+      const capMesh = new THREE.Mesh(capGeo, darkRubberMat);
+      capMesh.position.copy(cordEndPos);
+      capMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), cordEndTan);
+      addPart(capMesh);
+
+      scene.add(ironGroup);
+    }
+
+    // =========================================================================
+    // 5B. REALISTIC 3D DRAPED CLOTH SWATCH & PROJECTED LASER SCAN RETICLE
+    // =========================================================================
+    function buildClothSwatch() {
+      clothGroup = new THREE.Group();
+      const alphaMap = createRoundedClothAlphaMap();
+
+      // Build procedural PBR material for each of the 3 fabric types (Silk, Cotton, Linen)
+      for (const cloth of CLOTH_TYPES) {
+        const { map, bumpMap } = createClothWeaveTextures(cloth);
+        const mat = new THREE.MeshPhysicalMaterial({
+          map,
+          bumpMap,
+          bumpScale: cloth.bumpScale,
+          alphaMap,
+          alphaTest: 0.45,
+          roughness: cloth.roughness,
+          metalness: 0.02,
+          sheen: cloth.sheen,
+          sheenColor: new THREE.Color(cloth.sheenHex),
+          sheenRoughness: cloth.sheenRoughness,
+          side: THREE.DoubleSide
+        });
+        clothMaterials.push(mat);
+      }
+
+      // Subdivided 2.6 x 1.65 cloth plane with soft organic undulating edge folds & rounded taper
+      const clothGeo = new THREE.PlaneGeometry(2.6, 1.65, 56, 36);
+      clothGeo.rotateX(-Math.PI / 2);
+
+      const pos = clothGeo.attributes.position;
+      clothBasePositions = new Float32Array(pos.array.length);
+
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+
+        // Flat center ironing zone with soft organic draped ripples near the outer perimeter
+        const edgeX = smoothstep(0.62, 1.25, Math.abs(x));
+        const edgeZ = smoothstep(0.38, 0.78, Math.abs(z));
+        const edgeFactor = Math.max(edgeX, edgeZ);
+
+        // Smooth edge height taper down toward floor so corners settle softly
+        const cornerTaper = 1.0 - 0.82 * smoothstep(0.75, 1.0, Math.hypot(x / 1.3, z / 0.825));
+        const softWave = (
+          Math.sin(x * 4.4 + z * 1.9) * 0.015 +
+          Math.cos(z * 6.0 - x * 2.2) * 0.010
+        ) * (0.28 + 0.72 * edgeFactor);
+
+        const y = Math.max(-0.014, (0.008 + softWave) * cornerTaper);
+        pos.setY(i, y);
+
+        clothBasePositions[i * 3] = x;
+        clothBasePositions[i * 3 + 1] = y;
+        clothBasePositions[i * 3 + 2] = z;
+      }
+      clothGeo.computeVertexNormals();
+
+      clothMesh = new THREE.Mesh(clothGeo, clothMaterials[1]);
+      clothMesh.castShadow = true;
+      clothMesh.receiveShadow = true;
+      clothGroup.add(clothMesh);
+
+      // Projected rotating cyan laser scan reticle resting flush on top of cloth under x = -0.35
+      scanReticleMat = new THREE.MeshBasicMaterial({
+        map: createScanReticleTexture(),
+        color: 0x38e8ff,
+        transparent: true,
+        opacity: 0.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      const reticleGeo = new THREE.PlaneGeometry(0.72, 0.72);
+      reticleGeo.rotateX(-Math.PI / 2);
+      scanReticleMesh = new THREE.Mesh(reticleGeo, scanReticleMat);
+      // clothGroup.x is -0.22 so local x = -0.13 aligns reticle directly beneath sensor at world x = -0.35
+      scanReticleMesh.position.set(-0.13, 0.022, 0.0);
+      scanReticleMesh.visible = false;
+      clothGroup.add(scanReticleMesh);
+
+      // Initially hidden off to the side (z = 2.8)
+      clothGroup.position.set(-0.22, 0.018, 2.8);
+      clothGroup.visible = false;
+      scene.add(clothGroup);
+    }
+
+    // =========================================================================
+    // 6. STUDIO ENVIRONMENT, LIGHTING & REFLECTIVE CAD FLOOR
+    // =========================================================================
+    function buildStudioEnvironment() {
+      const pmremGenerator = new THREE.PMREMGenerator(renderer);
+      pmremGenerator.compileEquirectangularShader();
+      const roomEnv = new RoomEnvironment();
+      scene.environment = pmremGenerator.fromScene(roomEnv, 0.035).texture;
+      roomEnv.dispose();
+      pmremGenerator.dispose();
+
+      // 1. Key Light (Warm-neutral overhead softbox, casts soft shadows)
+      const keyLight = new THREE.DirectionalLight(0xfff7f0, 2.25);
+      keyLight.position.set(-2.6, 5.2, 3.8);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.set(2048, 2048);
+      keyLight.shadow.camera.near = 0.5;
+      keyLight.shadow.camera.far = 14;
+      keyLight.shadow.camera.left = -3.2;
+      keyLight.shadow.camera.right = 3.2;
+      keyLight.shadow.camera.top = 3.2;
+      keyLight.shadow.camera.bottom = -3.2;
+      keyLight.shadow.bias = -0.0004;
+      keyLight.shadow.radius = 4;
+      scene.add(keyLight);
+
+      // 2. Cool Studio Rim Light
+      const rimLight = new THREE.DirectionalLight(0xaad8ff, 1.85);
+      rimLight.position.set(3.8, 3.2, -3.5);
+      scene.add(rimLight);
+
+      // 3. Soft Rose-Tinted Fill Light
+      const fillLight = new THREE.DirectionalLight(0xffece0, 0.95);
+      fillLight.position.set(-2.5, 1.4, -3.2);
+      scene.add(fillLight);
+
+      // 4. Subtle Under-Bounce Light
+      const underBounce = new THREE.HemisphereLight(0x88a8cc, 0x3b4252, 0.65);
+      scene.add(underBounce);
+
+      // Sleek Dark Reflective Studio Floor + Faint CAD Grid
+      studioFloorGroup = new THREE.Group();
+
+      const gridTex = createStudioGridTexture();
+      const floorGeo = new THREE.CircleGeometry(11, 72);
+      floorGeo.rotateX(-Math.PI / 2);
+
+      const alphaCanvas = document.createElement('canvas');
+      alphaCanvas.width = 512;
+      alphaCanvas.height = 512;
+      const aCtx = alphaCanvas.getContext('2d');
+      const aGrad = aCtx.createRadialGradient(256, 256, 30, 256, 256, 252);
+      aGrad.addColorStop(0, 'rgba(255,255,255,1)');
+      aGrad.addColorStop(0.55, 'rgba(255,255,255,0.82)');
+      aGrad.addColorStop(0.85, 'rgba(255,255,255,0.18)');
+      aGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      aCtx.fillStyle = aGrad;
+      aCtx.fillRect(0, 0, 512, 512);
+      const alphaMap = new THREE.CanvasTexture(alphaCanvas);
+
+      const floorMat = new THREE.MeshStandardMaterial({
+        map: gridTex,
+        alphaMap: alphaMap,
+        transparent: true,
+        roughness: 0.34,
+        metalness: 0.25,
+        envMapIntensity: 0.75,
+        side: THREE.FrontSide
+      });
+      const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+      floorMesh.position.y = -0.002;
+      floorMesh.receiveShadow = true;
+      studioFloorGroup.add(floorMesh);
+
+      const shadowGeo = new THREE.PlaneGeometry(3.1, 1.75);
+      shadowGeo.rotateX(-Math.PI / 2);
+      contactShadowMat = new THREE.MeshBasicMaterial({
+        map: createContactShadowTexture(),
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+        side: THREE.FrontSide
+      });
+      const contactShadow = new THREE.Mesh(shadowGeo, contactShadowMat);
+      contactShadow.position.set(-0.18, -0.001, 0);
+      studioFloorGroup.add(contactShadow);
+
+      scene.add(studioFloorGroup);
+    }
+
+    // =========================================================================
+    // 7. 3D VOLUMETRIC STEAM BURST PARTICLE SYSTEM
+    // =========================================================================
+    function triggerSteamBurst(intensityScale = 1.0, silentIfOff = false) {
+      if (!state.powerOn) {
+        if (!silentIfOff) showToast('Turn on Smart Power to release a steam burst');
+        return;
+      }
+
+      if (!steamSpriteMaterial) {
+        steamSpriteMaterial = createSteamPuffTexture();
+      }
+
+      const cloth = state.activeClothIndex !== null ? CLOTH_TYPES[state.activeClothIndex] : null;
+      const arcFrac = cloth ? cloth.arcFrac : 0.55;
+      const puffCount = Math.round(46 * intensityScale);
+      const liftY = ironGroup ? ironGroup.position.y : 0.0;
+
+      for (let i = 0; i < puffCount; i++) {
+        const mat = new THREE.SpriteMaterial({
+          map: steamSpriteMaterial,
+          transparent: true,
+          opacity: 0.0,
+          depthWrite: false,
+          blending: THREE.NormalBlending,
+          color: new THREE.Color(0xeef8ff)
+        });
+        const sprite = new THREE.Sprite(mat);
+
+        const isTipJet = i < Math.round(puffCount * 0.26);
+        if (isTipJet) {
+          sprite.position.set(
+            -1.38 - Math.random() * 0.08,
+            liftY + 0.14 + Math.random() * 0.14,
+            (Math.random() - 0.5) * 0.10
+          );
+        } else {
+          const frac = Math.random();
+          const sx = -1.25 + frac * 1.98;
+          const side = Math.random() > 0.5 ? 1 : -1;
+          const sz = side * (getIronHalfWidth(sx) * (0.72 + Math.random() * 0.28));
+          sprite.position.set(sx, liftY + 0.025 + Math.random() * 0.04, sz);
+        }
+
+        const startScale = (isTipJet ? 0.14 + Math.random() * 0.1 : 0.18 + Math.random() * 0.14) * (0.75 + 0.25 * intensityScale);
+        sprite.scale.set(startScale, startScale, 1);
+
+        const vel = isTipJet
+          ? new THREE.Vector3(-0.95 - Math.random() * 0.65, 0.35 + Math.random() * 0.35, (Math.random() - 0.5) * 0.35)
+          : new THREE.Vector3(
+              (Math.random() - 0.5) * 0.25,
+              0.38 + Math.random() * 0.42,
+              Math.sign(sprite.position.z || 1) * (0.35 + Math.random() * 0.45)
+            );
+
+        scene.add(sprite);
+        steamParticles.push({
+          sprite,
+          vel,
+          age: -Math.random() * 0.22,
+          life: (1.45 + Math.random() * 0.90) * (0.8 + 0.2 * intensityScale),
+          startScale,
+          endScale: startScale * (3.1 + Math.random() * 1.6),
+          maxOpacity: (0.28 + Math.random() * 0.22) * (0.72 + arcFrac * 0.35) * Math.min(1, intensityScale + 0.25)
+        });
+      }
+    }
+
+    function updateSteamParticles(dt) {
+      for (let i = steamParticles.length - 1; i >= 0; i--) {
+        const p = steamParticles[i];
+        p.age += dt;
+        if (p.age < 0) continue;
+
+        const progress = p.age / p.life;
+        if (progress >= 1.0) {
+          scene.remove(p.sprite);
+          p.sprite.material.dispose();
+          steamParticles.splice(i, 1);
+          continue;
+        }
+
+        p.vel.x *= Math.pow(0.28, dt);
+        p.vel.z *= Math.pow(0.32, dt);
+        p.vel.y += 0.22 * dt;
+
+        p.sprite.position.addScaledVector(p.vel, dt);
+        p.sprite.position.x += Math.sin(p.age * 4.5 + i) * 0.06 * dt;
+
+        const s = THREE.MathUtils.lerp(p.startScale, p.endScale, Math.pow(progress, 0.65));
+        p.sprite.scale.set(s, s, 1);
+
+        const fadeIn = Math.min(1, progress / 0.18);
+        const fadeOut = 1 - smoothstep(0.32, 1.0, progress);
+        p.sprite.material.opacity = p.maxOpacity * fadeIn * fadeOut;
+      }
+    }
+
+    // =========================================================================
+    // 8. 3D PROJECTED FEATURE CALLOUTS OVERLAY (TRACKS IRON VERTICAL LIFT)
+    // =========================================================================
+    const calloutElements = [];
+
+    function initCalloutsOverlay() {
+      const svg = document.getElementById('callout-svg');
+      const badgesContainer = document.getElementById('callout-badges');
+      svg.innerHTML = '';
+      badgesContainer.innerHTML = '';
+
+      for (const item of FEATURE_CALLOUTS) {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('stroke', 'rgba(186, 230, 253, 0.75)');
+        line.setAttribute('stroke-width', '1.5');
+        svg.appendChild(line);
+
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('r', '3.8');
+        dot.setAttribute('fill', '#ffffff');
+        dot.setAttribute('stroke', '#38bdf8');
+        dot.setAttribute('stroke-width', '2');
+        svg.appendChild(dot);
+
+        const badge = document.createElement('div');
+        badge.className = 'callout-badge';
+        badge.innerHTML = `${item.title}<span class="callout-sub">${item.sub}</span>`;
+        badgesContainer.appendChild(badge);
+
+        calloutElements.push({ item, line, dot, badge });
+      }
+    }
+
+    function updateCalloutsOverlay() {
+      if (!state.showCallouts) return;
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const scaleOffset = w < 640 ? 0.68 : 1.0;
+      const liftY = ironGroup ? ironGroup.position.y : 0.0;
+
+      for (const entry of calloutElements) {
+        const worldAnchor = entry.item.anchor.clone();
+        worldAnchor.y += liftY;
+        const proj = worldAnchor.project(camera);
+
+        if (proj.z > 1.0) {
+          entry.badge.style.opacity = '0';
+          entry.line.style.opacity = '0';
+          entry.dot.style.opacity = '0';
+          continue;
+        }
+
+        const ax = (proj.x * 0.5 + 0.5) * w;
+        const ay = (-proj.y * 0.5 + 0.5) * h;
+
+        const bx = Math.max(92, Math.min(w - 92, ax + entry.item.offset.x * scaleOffset));
+        const by = Math.max(76, Math.min(h - 92, ay + entry.item.offset.y * scaleOffset));
+
+        entry.badge.style.left = `${bx}px`;
+        entry.badge.style.top = `${by}px`;
+        entry.badge.style.opacity = '1';
+
+        entry.line.setAttribute('x1', ax.toFixed(1));
+        entry.line.setAttribute('y1', ay.toFixed(1));
+        entry.line.setAttribute('x2', bx.toFixed(1));
+        entry.line.setAttribute('y2', by.toFixed(1));
+        entry.line.style.opacity = '1';
+
+        entry.dot.setAttribute('cx', ax.toFixed(1));
+        entry.dot.setAttribute('cy', ay.toFixed(1));
+        entry.dot.style.opacity = '1';
+      }
+    }
+
+    // =========================================================================
+    // 9. CLOTH AUTO-SENSING CHOREOGRAPHY, CAMERA PRESETS & UI WIRING
+    // =========================================================================
+    function transitionCameraTo(presetKey) {
+      const preset = CAMERA_PRESETS[presetKey];
+      if (!preset) return;
+
+      camTransition.active = true;
+      camTransition.startTime = clock.getElapsedTime();
+      camTransition.fromPos.copy(camera.position);
+      camTransition.toPos.copy(preset.pos);
+      camTransition.fromTarget.copy(controls.target);
+      camTransition.toTarget.copy(preset.target);
+
+      document.querySelectorAll('.cam-preset-btn').forEach((btn) => {
+        btn.classList.toggle('preset-active', btn.dataset.preset === presetKey);
+      });
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('status-toast');
+      toast.textContent = msg;
+      toast.style.opacity = '1';
+      toast.style.transform = 'translate(-50%, 0)';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translate(-50%, 8px)';
+      }, 2600);
+    }
+
+    /**
+     * Initiates sliding a selected cloth beneath the soleplate sensor for automatic detection.
+     */
+    function placeClothUnderSensor(clothIndex) {
+      // Clicking the already-active cloth removes it cleanly
+      if (state.activeClothIndex === clothIndex && state.phase !== 'sliding_out' && state.pendingClothIndex === null) {
+        removeClothFromSensor();
+        return;
+      }
+
+      // Automatically power on Smart Iron if currently OFF
+      if (!state.powerOn) {
+        state.powerOn = true;
+        state.targetPowerFactor = 1.0;
+      }
+
+      // If another cloth is currently under the iron, smoothly slide it out first then bring in the new one
+      if (state.activeClothIndex !== null && state.clothSlideZ < 2.2) {
+        state.pendingClothIndex = clothIndex;
+        state.phase = 'sliding_out';
+        state.phaseTimer = 0.0;
+        state.targetIronLiftY = 0.24;
+        updateHUD();
+        return;
+      }
+
+      beginClothSlideIn(clothIndex);
+    }
+
+    function beginClothSlideIn(clothIndex) {
+      state.activeClothIndex = clothIndex;
+      state.pendingClothIndex = null;
+      state.phase = 'sliding_in';
+      state.phaseTimer = 0.0;
+      state.clothSlideZ = 2.8;
+      state.targetIronLiftY = 0.24;
+
+      if (clothMesh && clothGroup) {
+        clothMesh.material = clothMaterials[clothIndex];
+        clothGroup.position.z = 2.8;
+        clothGroup.visible = true;
+      }
+
+      updateOledCanvas(clock ? clock.getElapsedTime() : 0);
+      updateHUD();
+    }
+
+    /**
+     * Slides the current cloth out from under the soleplate and resets the iron to Auto-Sense Ready.
+     */
+    function removeClothFromSensor() {
+      if (state.activeClothIndex === null && state.phase === 'standby') return;
+
+      state.pendingClothIndex = null;
+      state.phase = 'sliding_out';
+      state.phaseTimer = 0.0;
+      state.targetIronLiftY = 0.0;
+      updateOledCanvas(clock ? clock.getElapsedTime() : 0);
+      updateHUD();
+    }
+
+    /**
+     * Synchronizes Smart Power indicator, 3 cloth buttons, Remove Cloth button, and sensor readout pill.
+     */
+    function updateHUD() {
+      const powerBtn = document.getElementById('btn-power');
+      const thumb = document.getElementById('power-thumb');
+      const statusText = document.getElementById('power-status-text');
+      const readout = document.getElementById('hud-temp-readout');
+      const removeBtn = document.getElementById('btn-remove-cloth');
+
+      const cloth = state.activeClothIndex !== null ? CLOTH_TYPES[state.activeClothIndex] : null;
+      const hasClothActive = state.activeClothIndex !== null && state.phase !== 'sliding_out';
+
+      // Show/hide compact Remove Cloth button
+      removeBtn.classList.toggle('hidden', !hasClothActive);
+
+      // Update the 3 cloth buttons
+      document.querySelectorAll('.cloth-select-btn').forEach((btn, idx) => {
+        const badgeEl = btn.querySelector('.cloth-right-badge');
+        const c = CLOTH_TYPES[idx];
+        const isSelected = state.activeClothIndex === idx && state.phase !== 'sliding_out';
+        const isScanningThis = isSelected && (state.phase === 'sliding_in' || state.phase === 'scanning');
+        const isLockedThis = isSelected && state.phase === 'locked';
+
+        btn.classList.remove('mode-btn-active', 'mode-btn-scanning', 'text-slate-300');
+        if (isScanningThis) {
+          btn.classList.add('mode-btn-scanning');
+          badgeEl.textContent = 'Sensing...';
+          badgeEl.className = 'cloth-right-badge font-mono text-[10.5px] text-cyan-300 font-semibold';
+        } else if (isLockedThis) {
+          btn.classList.add('mode-btn-active');
+          badgeEl.textContent = `${c.temp}°C`;
+          badgeEl.className = 'cloth-right-badge font-mono text-[11px] px-1.5 py-0.5 rounded-md bg-sky-400/20 text-sky-200 font-semibold border border-sky-300/35';
+        } else {
+          btn.classList.add('text-slate-300');
+          badgeEl.textContent = c.weightTag;
+          badgeEl.className = 'cloth-right-badge text-[10.5px] text-slate-400 font-medium';
+        }
+      });
+
+      if (!state.powerOn) {
+        powerBtn.classList.add('bg-slate-700');
+        powerBtn.classList.remove('bg-sky-500', 'shadow-[0_0_14px_rgba(14,165,233,0.5)]');
+        thumb.style.transform = 'translateX(0px)';
+        statusText.textContent = 'Standby · Powered Off';
+        statusText.className = 'text-[10.5px] text-slate-400 font-medium mt-0.5 truncate';
+        readout.textContent = 'OFF';
+        readout.className = 'font-mono text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-slate-800/70 border border-white/10 text-slate-500 whitespace-nowrap';
+        return;
+      }
+
+      powerBtn.classList.remove('bg-slate-700');
+      powerBtn.classList.add('bg-sky-500', 'shadow-[0_0_14px_rgba(14,165,233,0.5)]');
+      thumb.style.transform = 'translateX(24px)';
+
+      if (state.phase === 'sliding_in' || state.phase === 'scanning') {
+        statusText.textContent = 'Scanning fabric under sensor...';
+        statusText.className = 'text-[10.5px] text-cyan-300 font-medium mt-0.5 truncate';
+        readout.textContent = 'Scanning...';
+        readout.className = 'font-mono text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-300/45 text-cyan-200 whitespace-nowrap';
+      } else if (state.phase === 'locked' && cloth) {
+        statusText.textContent = `Active · Auto: ${cloth.temp}°C ${cloth.label}`;
+        statusText.className = 'text-[10.5px] text-sky-400 font-medium mt-0.5 truncate';
+        readout.textContent = `${Math.round(state.displayedTemp)}°C`;
+        readout.className = 'font-mono text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/35 text-emerald-300 whitespace-nowrap';
+      } else {
+        statusText.textContent = 'Active · Auto-Sense Ready';
+        statusText.className = 'text-[10.5px] text-sky-400 font-medium mt-0.5 truncate';
+        readout.textContent = 'Auto-Sense';
+        readout.className = 'font-mono text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/30 text-sky-300 whitespace-nowrap';
+      }
+    }
+
+    function setToggleStyle(btnId, dotId, active) {
+      const btn = document.getElementById(btnId);
+      const dot = document.getElementById(dotId);
+      if (active) {
+        btn.className = 'viewport-toggle rounded-xl px-2.5 py-2 text-[11px] font-medium border border-sky-400/40 bg-sky-500/15 hover:bg-sky-500/20 text-sky-200 flex items-center justify-center gap-1.5 transition';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_6px_#38bdf8]';
+      } else {
+        btn.className = 'viewport-toggle rounded-xl px-2.5 py-2 text-[11px] font-medium border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] text-slate-200 flex items-center justify-center gap-1.5 transition';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+      }
+    }
+
+    function initUIControls() {
+      // Populate the 3 cloth buttons (Silk, Cotton, Linen)
+      const clothContainer = document.getElementById('cloth-selector');
+      clothContainer.innerHTML = '';
+
+      CLOTH_TYPES.forEach((cloth, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.clothIndex = String(index);
+        btn.className = 'cloth-select-btn w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] text-left flex items-center justify-between transition text-slate-300';
+        btn.innerHTML = `
+          <span class="flex items-center gap-2.5">
+            <span class="swatch-dot w-4 h-4 rounded-full border border-white/30 shadow-inner shrink-0" style="background-color:${cloth.colorHex};"></span>
+            <span class="text-xs font-medium">${cloth.label}</span>
+          </span>
+          <span class="cloth-right-badge text-[10.5px] text-slate-400 font-medium">${cloth.weightTag}</span>
+        `;
+        btn.addEventListener('click', () => {
+          placeClothUnderSensor(index);
+        });
+        clothContainer.appendChild(btn);
+      });
+
+      // Remove Cloth button
+      document.getElementById('btn-remove-cloth').addEventListener('click', () => {
+        removeClothFromSensor();
+      });
+
+      // Smart Power Toggle
+      document.getElementById('btn-power').addEventListener('click', () => {
+        state.powerOn = !state.powerOn;
+        state.targetPowerFactor = state.powerOn ? 1.0 : 0.0;
+        if (state.powerOn && state.activeClothIndex !== null && state.phase === 'locked') {
+          // Re-verify cloth on power-up
+          state.phase = 'scanning';
+          state.phaseTimer = 0.0;
+        }
+        updateHUD();
+      });
+
+      // Steam Burst
+      document.getElementById('btn-steam').addEventListener('click', () => {
+        triggerSteamBurst(1.0, false);
+      });
+
+      // Feature Callouts Toggle
+      document.getElementById('btn-callouts').addEventListener('click', () => {
+        state.showCallouts = !state.showCallouts;
+        document.getElementById('callout-layer').classList.toggle('hidden', !state.showCallouts);
+        setToggleStyle('btn-callouts', 'dot-callouts', state.showCallouts);
+        updateCalloutsOverlay();
+      });
+
+      // Auto-Rotate Toggle
+      document.getElementById('btn-autorotate').addEventListener('click', () => {
+        state.autoRotate = !state.autoRotate;
+        controls.autoRotate = state.autoRotate;
+        setToggleStyle('btn-autorotate', 'dot-autorotate', state.autoRotate);
+      });
+
+      // Wireframe Toggle
+      document.getElementById('btn-wireframe').addEventListener('click', () => {
+        state.wireframe = !state.wireframe;
+        const visited = new Set();
+        for (const mesh of allIronMeshes) {
+          if (mesh.material && !visited.has(mesh.material)) {
+            visited.add(mesh.material);
+            mesh.material.wireframe = state.wireframe;
+          }
+        }
+        setToggleStyle('btn-wireframe', 'dot-wireframe', state.wireframe);
+      });
+
+      // Studio Floor Toggle
+      document.getElementById('btn-floor').addEventListener('click', () => {
+        state.showFloor = !state.showFloor;
+        studioFloorGroup.visible = state.showFloor;
+        setToggleStyle('btn-floor', 'dot-floor', state.showFloor);
+      });
+
+      // Camera Presets
+      document.querySelectorAll('.cam-preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          transitionCameraTo(btn.dataset.preset);
+        });
+      });
+
+      // Control Panel Collapse/Expand
+      const panelEl = document.getElementById('control-panel');
+      const toggleLabel = document.getElementById('panel-toggle-label');
+      const syncPanelVisibility = () => {
+        panelEl.classList.toggle('hidden', !state.panelOpen);
+        toggleLabel.textContent = state.panelOpen ? 'Hide' : 'Controls';
+      };
+      syncPanelVisibility();
+
+      document.getElementById('btn-toggle-panel').addEventListener('click', () => {
+        state.panelOpen = !state.panelOpen;
+        syncPanelVisibility();
+      });
+
+      updateHUD();
+    }
+
+    // =========================================================================
+    // 10. INITIALIZATION & RENDER ANIMATION LOOP
+    // =========================================================================
+    function initScene() {
+      const container = document.getElementById('viewport-container');
+
+      scene = new THREE.Scene();
+
+      camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.05, 60);
+      camera.position.copy(CAMERA_PRESETS.threeQuarter.pos);
+
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        powerPreference: 'high-performance'
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.12;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.065;
+      controls.enablePan = false;
+      controls.minDistance = 1.55;
+      controls.maxDistance = 7.2;
+      controls.minPolarAngle = 0.04;
+      controls.maxPolarAngle = Math.PI - 0.04;
+      controls.autoRotateSpeed = 1.15;
+      controls.target.copy(CAMERA_PRESETS.threeQuarter.target);
+      controls.update();
+
+      controls.addEventListener('start', () => {
+        camTransition.active = false;
+      });
+
+      clock = new THREE.Clock();
+
+      initOledDisplayCanvas();
+      buildStudioEnvironment();
+      buildSmartSteamIron();
+      buildClothSwatch();
+      initCalloutsOverlay();
+      initUIControls();
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      updateCalloutsOverlay();
+    }
+
+    let lastOledDrawTime = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.getElapsedTime();
+
+      // 1. Smoothly interpolate Smart Power state
+      state.powerFactor += (state.targetPowerFactor - state.powerFactor) * Math.min(1, dt * 6.5);
+
+      // 2. Auto-Sensing Choreography State Machine
+      state.phaseTimer += dt;
+      let needsOledUpdate = false;
+
+      if (state.phase === 'sliding_in') {
+        const dur = 0.55;
+        const t = Math.min(1, state.phaseTimer / dur);
+        // Smooth cubic ease-out slide from z = 2.8 -> 0.0
+        const easeOut = 1 - Math.pow(1 - t, 3);
+        state.clothSlideZ = THREE.MathUtils.lerp(2.8, 0.0, easeOut);
+        if (clothGroup) clothGroup.position.z = state.clothSlideZ;
+        needsOledUpdate = true;
+
+        if (t >= 1.0) {
+          state.phase = 'scanning';
+          state.phaseTimer = 0.0;
+          updateHUD();
+        }
+      } else if (state.phase === 'scanning') {
+        const scanDur = 0.90;
+        needsOledUpdate = true;
+
+        if (state.phaseTimer >= scanDur && state.powerOn) {
+          const detected = CLOTH_TYPES[state.activeClothIndex];
+          state.phase = 'locked';
+          state.phaseTimer = 0.0;
+          state.lockFlashTimer = 0.42;
+          state.targetIronLiftY = 0.11; // Hover cleanly over cloth ready to iron
+          if (state.displayedTemp < 75 || state.displayedTemp > 210) {
+            state.displayedTemp = 80;
+          }
+          state.targetTemp = detected.temp;
+
+          updateHUD();
+          showToast(`Detected ${detected.label} — Auto-set to ${detected.temp}°C`);
+
+          // Subtle mini puff of steam on Cotton or Linen lock-in
+          if (detected.id === 'cotton' || detected.id === 'linen') {
+            triggerSteamBurst(detected.id === 'linen' ? 0.42 : 0.28, true);
+          }
+        }
+      } else if (state.phase === 'locked') {
+        // Smoothly count/ramp displayed 7-segment temperature to target
+        const diff = state.targetTemp - state.displayedTemp;
+        if (Math.abs(diff) > 0.35) {
+          state.displayedTemp += diff * Math.min(1, dt * 4.8);
+          needsOledUpdate = true;
+          const readoutEl = document.getElementById('hud-temp-readout');
+          if (readoutEl && state.powerOn) {
+            readoutEl.textContent = `${Math.round(state.displayedTemp)}°C`;
+          }
+        } else if (state.displayedTemp !== state.targetTemp) {
+          state.displayedTemp = state.targetTemp;
+          needsOledUpdate = true;
+          const readoutEl = document.getElementById('hud-temp-readout');
+          if (readoutEl && state.powerOn) {
+            readoutEl.textContent = `${Math.round(state.displayedTemp)}°C`;
+          }
+        }
+        if (state.lockFlashTimer > 0) {
+          state.lockFlashTimer = Math.max(0, state.lockFlashTimer - dt);
+        }
+      } else if (state.phase === 'sliding_out') {
+        const dur = state.pendingClothIndex !== null ? 0.34 : 0.46;
+        const t = Math.min(1, state.phaseTimer / dur);
+        const easeIn = t * t * (3 - 2 * t);
+        state.clothSlideZ = THREE.MathUtils.lerp(0.0, 2.8, easeIn);
+        if (clothGroup) clothGroup.position.z = state.clothSlideZ;
+
+        if (t >= 1.0) {
+          if (state.pendingClothIndex !== null) {
+            const nextIdx = state.pendingClothIndex;
+            beginClothSlideIn(nextIdx);
+          } else {
+            state.activeClothIndex = null;
+            state.phase = 'standby';
+            state.phaseTimer = 0.0;
+            state.displayedTemp = 80;
+            state.targetTemp = 80;
+            if (clothGroup) clothGroup.visible = false;
+            updateOledCanvas(elapsed);
+            updateHUD();
+          }
+        }
+      } else {
+        // Standby: gentle breathing arc pulse on OLED
+        needsOledUpdate = true;
+      }
+
+      // Throttle periodic canvas redraws cleanly for smooth 60fps performance
+      const drawInterval = state.phase === 'standby' ? 0.08 : 0.038;
+      if (needsOledUpdate && elapsed - lastOledDrawTime >= drawInterval) {
+        updateOledCanvas(elapsed);
+        lastOledDrawTime = elapsed;
+      }
+
+      // 3. Smooth Iron Vertical Lift & Subtle Contact Shadow Softening
+      state.ironLiftY += (state.targetIronLiftY - state.ironLiftY) * Math.min(1, dt * 6.5);
+      if (ironGroup) {
+        ironGroup.position.y = state.ironLiftY;
+      }
+      if (contactShadowMat) {
+        contactShadowMat.opacity = THREE.MathUtils.lerp(0.85, 0.48, Math.min(1, state.ironLiftY / 0.24));
+      }
+
+      // Subtle living micro-ripple on cloth swatch when visible
+      if (clothGroup && clothGroup.visible && clothMesh && clothBasePositions) {
+        const pos = clothMesh.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const bx = clothBasePositions[i * 3];
+          const by = clothBasePositions[i * 3 + 1];
+          const bz = clothBasePositions[i * 3 + 2];
+          const flutter = Math.sin(bx * 2.5 + elapsed * 1.6) * Math.cos(bz * 2.4 + elapsed * 1.2) * 0.0022;
+          pos.setY(i, by + flutter);
+        }
+        pos.needsUpdate = true;
+      }
+
+      // 4. Bottom Optical Sensor Beam Cone, Reticle, Flash & Underside Lighting
+      const isScanning = state.powerOn && state.phase === 'scanning';
+      const isLockedActive = state.powerOn && state.phase === 'locked' && state.activeClothIndex !== null;
+      const isConfirmFlash = state.lockFlashTimer > 0 && isLockedActive;
+
+      if (sensorBeamMesh && sensorBeamMat && scanReticleMesh && scanReticleMat) {
+        const clothTopY = 0.026;
+        const beamHeight = Math.max(0.04, state.ironLiftY - clothTopY + 0.005);
+        sensorBeamMesh.scale.set(1.0, beamHeight, 1.0);
+        sensorBeamMesh.position.y = -beamHeight * 0.5;
+
+        if (sensorBeamMat.map) {
+          sensorBeamMat.map.offset.y -= dt * (isScanning ? 2.5 : 0.7);
+        }
+
+        const scanPulse = 0.78 + 0.22 * Math.sin(elapsed * 22);
+        const targetBeamOp = isScanning
+          ? 0.72 * scanPulse
+          : isConfirmFlash
+            ? 0.65
+            : isLockedActive
+              ? 0.20 + 0.04 * Math.sin(elapsed * 3.5)
+              : 0.0;
+
+        sensorBeamMat.opacity += (targetBeamOp - sensorBeamMat.opacity) * Math.min(1, dt * 11.0);
+        sensorBeamMesh.visible = sensorBeamMat.opacity > 0.01;
+
+        // Confirmation flash shifts reticle & beam briefly toward crisp cyan-emerald
+        const flashColor = isConfirmFlash ? 0x34f5c5 : 0x22d3ee;
+        sensorBeamMat.color.setHex(flashColor);
+        scanReticleMat.color.setHex(isConfirmFlash ? 0x4df9c8 : 0x38e8ff);
+
+        const targetReticleOp = isScanning
+          ? 0.94
+          : isConfirmFlash
+            ? 1.0
+            : isLockedActive
+              ? 0.34
+              : 0.0;
+        scanReticleMat.opacity += (targetReticleOp - scanReticleMat.opacity) * Math.min(1, dt * 11.0);
+        scanReticleMesh.visible = scanReticleMat.opacity > 0.01 && clothGroup.visible;
+        scanReticleMesh.rotation.y += dt * (isScanning ? 3.4 : 0.55);
+
+        const retScale = isConfirmFlash
+          ? 1.08
+          : isScanning
+            ? 0.88 + 0.14 * Math.sin(elapsed * 14)
+            : 0.78;
+        scanReticleMesh.scale.set(retScale, 1, retScale);
+
+        // Micro-LED ring & dual IR diodes glow on soleplate underside
+        const ringGlow = state.powerOn
+          ? (isScanning ? 4.4 * scanPulse : isConfirmFlash ? 4.8 : isLockedActive ? 2.5 : 1.05 + 0.35 * Math.sin(elapsed * 2.4))
+          : 0.0;
+        sensorRingMat.emissive.setHex(isConfirmFlash ? 0x10e8a8 : 0x00c8ff);
+        sensorRingMat.emissiveIntensity = ringGlow;
+        sensorIrMat.emissiveIntensity = ringGlow * 0.85;
+
+        sensorPointLight.color.setHex(isConfirmFlash ? 0x22f5b8 : 0x00ccff);
+        sensorPointLight.intensity = isScanning ? 2.8 * scanPulse : isConfirmFlash ? 3.0 : isLockedActive ? 0.95 : 0.0;
+      }
+
+      // 5. Animate OLED Emissive Glow & Front Blue LED Tip
+      const activeCloth = state.activeClothIndex !== null && state.phase === 'locked'
+        ? CLOTH_TYPES[state.activeClothIndex]
+        : null;
+      const baseLedInt = activeCloth ? activeCloth.ledIntensity : 1.55;
+      const baseArc = activeCloth ? activeCloth.arcFrac : 0.42;
+      const pulse = 1.0 + 0.06 * Math.sin(elapsed * 3.2);
+
+      if (oledMaterial) {
+        oledMaterial.emissiveIntensity = 1.38 * state.powerFactor;
+      }
+      if (blueLedMaterial && blueLedCoreMaterial && tipPointLight) {
+        blueLedMaterial.emissiveIntensity = baseLedInt * state.powerFactor * pulse;
+        blueLedCoreMaterial.emissiveIntensity = (baseLedInt * 1.55) * state.powerFactor * pulse;
+        tipPointLight.intensity = (0.75 + baseArc * 0.85) * state.powerFactor * pulse;
+      }
+
+      // 6. Smooth Cubic Ease-In-Out Camera Preset Animation
+      if (camTransition.active) {
+        const rawT = Math.min(1, (elapsed - camTransition.startTime) / camTransition.duration);
+        const ease = rawT < 0.5 ? 4 * rawT * rawT * rawT : 1 - Math.pow(-2 * rawT + 2, 3) / 2;
+
+        camera.position.lerpVectors(camTransition.fromPos, camTransition.toPos, ease);
+        controls.target.lerpVectors(camTransition.fromTarget, camTransition.toTarget, ease);
+
+        if (rawT >= 1.0) {
+          camTransition.active = false;
+        }
+      }
+
+      // 7. Update Controls, Steam Particles & Projected Callouts
+      controls.update();
+      updateSteamParticles(dt);
+      updateCalloutsOverlay();
+
+      renderer.render(scene, camera);
+    }
+
+    // Start after full window load with graceful error handling
+    window.addEventListener('load', () => {
+      try {
+        initScene();
+        animate();
+      } catch (err) {
+        console.error('3D Studio Initialization Error:', err);
+        showToast('WebGL initialization issue detected.');
+      }
+    });
+  </script>
+</body>
+</html>
